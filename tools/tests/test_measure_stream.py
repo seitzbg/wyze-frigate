@@ -72,6 +72,19 @@ class ParseTests(unittest.TestCase):
         self.assertEqual([t for t, _ in cap.errors], [1.0])
         self.assertEqual([t for t, _ in cap.warnings], [2.0])
 
+    def test_redact_adversarial(self):
+        url = "rtsp://viewer:abc'def@cam-host.lan:8554/back_porch"
+        cases = [
+            f"[error] {url}: Connection refused",
+            "[error] could not resolve cam-host.lan for back_porch",
+            "[error] [fe80::1ff:fe23:4567:890a]:8554 unreachable",
+            "[error] mac=D03F27A1B2C3 uid=XYZ123 and bare D03F27A1B2C3",
+        ]
+        for text in cases:
+            out = ms.redact(text, ms.url_secrets(url))
+            for leak in ("abc", "def@", "cam-host.lan", "back_porch", "fe80::1ff", "D03F27A1B2C3", "XYZ123"):
+                self.assertNotIn(leak, out, (text, out))
+
     def test_output_muxer_messages_are_not_decoder_errors(self):
         # The null muxer at the end of the measurement pipeline complains when
         # two frames share a timestamp. The video itself decoded fine.
@@ -106,7 +119,7 @@ class SummaryTests(unittest.TestCase):
         self.assertGreaterEqual(r["arrival_gap_max_s"], 1.2)
         self.assertLess(r["pts_gap_max_s"], 0.1)
         self.assertEqual(r["verdict"], "FAIL")
-        self.assertTrue(any("delivery" in reason for reason in r["reasons"]), r["reasons"])
+        self.assertTrue(any("no frames for" in reason for reason in r["reasons"]), r["reasons"])
 
     def test_timestamp_gap_fails(self):
         t = [x for i, x in enumerate(clean_times()) if not 100 <= i < 120]
@@ -164,6 +177,51 @@ class SummaryTests(unittest.TestCase):
         r = ms.summarize(cap_with(frames(t, pts), end=12.0), 10, 2)
         self.assertEqual(r["pts_repeats"], 1)
         self.assertEqual(r["verdict"], "PASS", r["reasons"])
+
+    def test_gap_just_over_limit_fails(self):
+        t = [x + (0.4504 if i >= 120 else 0) for i, x in enumerate(clean_times())]
+        pts = [i * 0.05 for i in range(len(t))]
+        r = ms.summarize(cap_with(frames(t, pts), end=12.5), 10, 2)
+        self.assertEqual(r["verdict"], "FAIL")
+
+    def test_gap_just_under_limit_passes(self):
+        t = [x + (0.4496 if i >= 120 else 0) for i, x in enumerate(clean_times())]
+        pts = [i * 0.05 for i in range(len(t))]
+        r = ms.summarize(cap_with(frames(t, pts), end=12.5), 10, 2)
+        self.assertEqual(r["verdict"], "PASS", r["reasons"])
+
+    def test_scattered_frame_loss_fails(self):
+        # Every fourth frame lost: the median timestamp step still says 20 fps.
+        t = [x for i, x in enumerate(clean_times()) if i % 4 != 3]
+        r = ms.summarize(cap_with(frames(t), end=12.0), 10, 2)
+        self.assertEqual(r["verdict"], "FAIL")
+        self.assertTrue(any("delivered" in reason for reason in r["reasons"]), r["reasons"])
+
+    def test_uniform_frame_loss_fails_against_expected_fps(self):
+        # Three of every ten frames kept: timestamps and arrivals look even.
+        t = [x for i, x in enumerate(clean_times()) if i % 10 in (0, 3, 6)]
+        self.assertEqual(ms.summarize(cap_with(frames(t), end=12.0), 10, 2)["verdict"], "PASS")
+        r = ms.summarize(cap_with(frames(t), end=12.0), 10, 2, expect_fps=20)
+        self.assertEqual(r["verdict"], "FAIL")
+
+    def test_missing_timestamps_fail(self):
+        t = clean_times()
+        r = ms.summarize(cap_with(frames(t, [None] * len(t)), end=12.0), 10, 2)
+        self.assertEqual(r["verdict"], "FAIL")
+        self.assertTrue(any("timestamps" in reason for reason in r["reasons"]), r["reasons"])
+
+    def test_frozen_timestamps_fail(self):
+        t = clean_times()
+        r = ms.summarize(cap_with(frames(t, [7.0] * len(t)), end=12.0), 10, 2)
+        self.assertEqual(r["verdict"], "FAIL")
+        self.assertTrue(any("timestamps" in reason for reason in r["reasons"]), r["reasons"])
+
+    def test_non_finite_arguments_rejected(self):
+        for flag, value in (("--duration", "nan"), ("--duration", "inf"), ("--duration", "0"),
+                            ("--warmup", "-1"), ("--connect-timeout", "nan"), ("--expect-fps", "inf")):
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as e:
+                ms.main(["rtsp://x/y", flag, value])
+            self.assertEqual(e.exception.code, 2, (flag, value))
 
     def test_backwards_pts_counted_not_gap(self):
         t = clean_times()
