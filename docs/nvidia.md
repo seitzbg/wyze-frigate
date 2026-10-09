@@ -1,0 +1,53 @@
+# NVIDIA GPU setup
+
+This is how we run Frigate: ONNX object detection with YOLOv9 on an NVIDIA
+GPU, and NVDEC hardware video decode. It needs an amd64 host with an NVIDIA
+GPU, its driver, and the
+[NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
+
+## 1. Export the model
+
+Frigate does not download YOLOv9 for you. Build it once from the `frigate/`
+directory:
+
+```sh
+docker build . --build-arg IMG_SIZE=320 --output ./config/model_cache \
+    -f nvidia/model-export.Dockerfile
+```
+
+This writes `config/model_cache/yolov9-t-320.onnx` (about 8 MB). The build
+pins the YOLOv9 source and the weights' checksum. It downloads PyTorch, so
+expect a few GB and several minutes. Keep the file: it lives in your config
+directory, not in the image.
+
+## 2. Use the NVIDIA config
+
+```sh
+cp nvidia/config.nvidia.yml config/config.yml   # then edit the cameras
+../tools/validate-frigate-config config/config.yml ghcr.io/blakeblackshear/frigate:0.18.0-tensorrt
+```
+
+It differs from the baseline in three places: the `onnx` detector, the YOLOv9
+`model` block, and `ffmpeg.hwaccel_args: preset-nvidia` for NVDEC decode
+(one ffmpeg process per camera on the GPU).
+
+## 3. Start with the GPU override
+
+```sh
+docker compose -f docker-compose.yml -f nvidia/docker-compose.nvidia.yml up -d
+```
+
+The override switches to the `-tensorrt` image, raises `shm_size` to 1 GB,
+and requests the GPU. It uses the toolkit's `deploy.resources` form from
+Frigate's docs. We run the CDI form (`devices: - nvidia.com/gpu=all`)
+because our host has no nvidia runtime configured. The comment in the file
+shows how to switch.
+
+## Checking it
+
+- Frigate's System metrics page shows detector inference time and GPU
+  load.
+- The GPU percentage covers everything on that GPU, not only Frigate.
+  Compare with `nvidia-smi` when another container shares the card.
+- After a host reboot, CDI device numbers can change. See the NVIDIA entry
+  in [troubleshooting.md](troubleshooting.md).
