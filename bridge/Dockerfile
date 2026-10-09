@@ -2,9 +2,10 @@
 # docker-wyze-bridge with a patched go2rtc. See ../docs/patches.md.
 ARG BRIDGE_VERSION=4.5.0
 ARG BRIDGE_DIGEST=sha256:708903d2882c76966ecb29763a075372d89773aa6796d0aab70f04369cc6d521
+ARG BRIDGE_COMMIT=da56b956b9bfb8f426f8c2efda71f8f2851e76b8
 ARG GO2RTC_COMMIT=a7f9c64a1591ef984e9a595c66b5e89ace3c6221
 
-FROM --platform=$BUILDPLATFORM golang:1.24.13-bookworm AS go2rtc
+FROM --platform=$BUILDPLATFORM golang:1.24.13-bookworm@sha256:1a6d4452c65dea36aac2e2d606b01b4a029ec90cc1ae53890540ce6173ea77ac AS go2rtc
 ARG GO2RTC_COMMIT
 RUN git clone -q https://github.com/AlexxIT/go2rtc /src
 WORKDIR /src
@@ -22,18 +23,33 @@ RUN CGO_ENABLED=0 go test ./pkg/wyze ./pkg/tutk/...
 ARG TARGETOS TARGETARCH
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -o /out/go2rtc .
 
-# License notices for the image, and the source tarballs attached to releases.
-FROM --platform=$BUILDPLATFORM golang:1.24.13-bookworm AS sources
-ARG BRIDGE_VERSION GO2RTC_COMMIT
-RUN git clone -q --depth 1 --branch v${BRIDGE_VERSION} https://github.com/IDisposable/docker-wyze-bridge /bridge
+# Complete source for the release, with every Go module vendored, and the
+# license notices that go into the image.
+FROM --platform=$BUILDPLATFORM golang:1.24.13-bookworm@sha256:1a6d4452c65dea36aac2e2d606b01b4a029ec90cc1ae53890540ce6173ea77ac AS go2rtc-src
 COPY --from=go2rtc /src /go2rtc
+RUN cd /go2rtc && go mod vendor
+
+# The bridge needs a newer Go than go2rtc (its go.mod says 1.26.4).
+FROM --platform=$BUILDPLATFORM golang:1.26.9-bookworm@sha256:d9c68c2c51161e12fd77e4c6320687c9cd86e1af1e3ad6e6cd63ff970641453c AS bridge-src
+ARG BRIDGE_COMMIT
+RUN git clone -q https://github.com/IDisposable/docker-wyze-bridge /bridge \
+ && cd /bridge && git checkout -q ${BRIDGE_COMMIT} && go mod vendor
+
+FROM --platform=$BUILDPLATFORM golang:1.24.13-bookworm@sha256:1a6d4452c65dea36aac2e2d606b01b4a029ec90cc1ae53890540ce6173ea77ac AS sources
+ARG BRIDGE_VERSION GO2RTC_COMMIT
+COPY --from=go2rtc-src /go2rtc /go2rtc
+COPY --from=bridge-src /bridge /bridge
 COPY patches/ /doc/patches/
 COPY SOURCES.txt /doc/SOURCES.txt
 RUN short=$(echo "$GO2RTC_COMMIT" | cut -c1-7) \
- && mkdir -p /bundle \
+ && mkdir -p /bundle /doc/third_party \
  && cp /go2rtc/LICENSE /doc/LICENSE.go2rtc \
  && cp /bridge/LICENSE /doc/LICENSE.wyze-bridge \
  && cp /bridge/THIRD_PARTY_NOTICES.md /doc/THIRD_PARTY_NOTICES.wyze-bridge.md \
+ && for tree in go2rtc bridge; do \
+      (cd "/$tree/vendor" && find . -type f \( -iname 'LICENSE*' -o -iname 'COPYING*' -o -iname 'NOTICE*' \) \
+        -exec install -D -m 0644 {} "/doc/third_party/$tree/{}" \;); \
+    done \
  && tar -C / --exclude=.git -czf "/bundle/go2rtc-${short}-patched-src.tar.gz" go2rtc \
  && tar -C / --exclude=.git -czf "/bundle/docker-wyze-bridge-v${BRIDGE_VERSION}-src.tar.gz" bridge
 

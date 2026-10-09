@@ -2,11 +2,20 @@ This image redistributes docker-wyze-bridge unmodified and replaces its
 go2rtc binary with a patched build.
 
 docker-wyze-bridge  AGPL-3.0  https://github.com/IDisposable/docker-wyze-bridge
-  tag v4.5.0
+  tag v4.5.0, commit da56b956b9bfb8f426f8c2efda71f8f2851e76b8
   image idisposablegithub365/wyze-bridge:4.5.0@sha256:708903d2882c76966ecb29763a075372d89773aa6796d0aab70f04369cc6d521
 go2rtc              MIT       https://github.com/AlexxIT/go2rtc
   commit a7f9c64a1591ef984e9a595c66b5e89ace3c6221 (head of PR #2324)
   plus the patches in patches/ and a WebRTC profile default (see the Dockerfile)
 
-Complete source for both is attached to every release at
-https://github.com/seitzbg/wyze-frigate/releases
+third_party/ holds the license files of the Go modules both programs are
+built from. LICENSE.wyze-bridge and THIRD_PARTY_NOTICES.wyze-bridge.md are
+the bridge's own.
+
+The bridge's gwell-proxy is built from code vendored in the bridge source
+(internal/gwell/upstream). Upstream describes its license two ways: that
+directory's README says GPL, and the bridge's THIRD_PARTY_NOTICES.md says
+MIT. Its full source is in the bridge source tarball.
+
+Complete source for both programs, with every Go module vendored, is
+attached to each release at https://github.com/seitzbg/wyze-frigate/releases

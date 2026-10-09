@@ -85,9 +85,13 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  checks:
+    if: startsWith(github.ref, 'refs/tags/v')
+    uses: ./.github/workflows/checks.yml
+
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [build, checks]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -109,6 +113,30 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Build the source bundle
+        run: docker buildx build bridge --target source-bundle --output type=local,dest=dist
+
+      # Check the images that were pushed, by digest, before any tag points at
+      # them. The amd64 go2rtc must be byte-identical to the verified build.
+      - name: Verify the pushed images
+        run: |
+          arches=""
+          for d in digests/*; do
+            ref="$IMAGE@sha256:$(basename "$d")"
+            docker pull -q "$ref" >/dev/null
+            arch=$(docker image inspect --format '{{.Architecture}}' "$ref")
+            arches="$arches $arch"
+            if [ "$arch" = amd64 ]; then
+              id=$(docker create "$ref")
+              docker cp "$id:/usr/local/bin/go2rtc" ./go2rtc
+              docker rm "$id" >/dev/null
+              sha256sum -c bridge/go2rtc-amd64.sha256
+            fi
+          done
+          echo "architectures:$arches"
+          case "$arches" in *amd64*) ;; *) echo "no amd64 image"; exit 1 ;; esac
+          case "$arches" in *arm64*) ;; *) echo "no arm64 image"; exit 1 ;; esac
+
       - name: Tag the multi-arch image
         run: |
           tag="${GITHUB_REF_NAME#v}"
@@ -116,9 +144,6 @@ jobs:
           docker buildx imagetools create -t "$IMAGE:$tag" -t "$IMAGE:latest" \
             $(printf "$IMAGE@sha256:%s " $(ls digests))
           docker buildx imagetools inspect "$IMAGE:$tag"
-
-      - name: Build the source bundle
-        run: docker buildx build bridge --target source-bundle --output type=local,dest=dist
 
       - name: Create the release
         env:
@@ -130,7 +155,8 @@ jobs:
           Image: \`$IMAGE:$tag\` (\`$digest\`), linux/amd64 and linux/arm64.
 
           The image bundles docker-wyze-bridge (AGPL-3.0, unmodified) and a patched
-          go2rtc (MIT). Their complete source is attached below. License notices are
-          in \`/usr/share/doc/wyze-bridge-patched/\` inside the image.
+          go2rtc (MIT). Their complete source, with Go modules vendored, is attached
+          below. License notices are in \`/usr/share/doc/wyze-bridge-patched/\`
+          inside the image.
           NOTES
           gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --notes-file notes.md
