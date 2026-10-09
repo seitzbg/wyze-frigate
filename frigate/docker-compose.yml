@@ -1,0 +1,23 @@
+services:
+  frigate:
+    image: ghcr.io/blakeblackshear/frigate:0.18.0
+    container_name: frigate
+    restart: unless-stopped
+    stop_grace_period: 30s
+    # Per camera: (width * height * 1.5 * 20 + 270480) / 1048576 MB, plus
+    # 40 MB for logs. A 2304x1296 camera needs about 86 MB, so 512mb covers
+    # five of them.
+    shm_size: "512mb"
+    env_file: .env
+    volumes:
+      - ./config:/config
+      - ./storage:/media/frigate
+      - type: tmpfs
+        target: /tmp/cache
+        tmpfs:
+          size: 1000000000
+    ports:
+      # Authenticated UI (https, self-signed certificate). Do not publish
+      # 8554, 8555 or 1984 when the bridge runs on the same host: the bridge
+      # already owns them.
+      - "8971:8971"

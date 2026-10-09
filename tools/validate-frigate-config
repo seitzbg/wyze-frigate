@@ -1,0 +1,27 @@
+#!/bin/sh
+# Validate a Frigate config with the Frigate image itself.
+# Frigate 0.18's --validate-config exits 0 even after it falls back to safe
+# mode, so this also fails when the validation-errors banner appears.
+# Usage: tools/validate-frigate-config CONFIG [IMAGE]
+# Needs a local Docker daemon (the config is bind-mounted). FRIGATE_*
+# variables in your environment are passed through; FRIGATE_BRIDGE_IP gets
+# a placeholder when unset.
+set -eu
+config=${1:?usage: validate-frigate-config CONFIG [IMAGE]}
+image=${2:-ghcr.io/blakeblackshear/frigate:0.18.0}
+dir=$(mktemp -d)
+trap 'rm -rf "$dir"' EXIT
+cp "$config" "$dir/config.yml"
+: "${FRIGATE_BRIDGE_IP:=192.0.2.10}"
+export FRIGATE_BRIDGE_IP
+envs=$(env | sed -n 's/^\(FRIGATE_[A-Z0-9_]*\)=.*/-e \1/p')
+# shellcheck disable=SC2086
+if ! out=$(docker run --rm -v "$dir:/config" $envs --entrypoint python3 "$image" -u -m frigate --validate-config 2>&1); then
+    printf '%s\n' "$out"
+    exit 1
+fi
+if printf '%s\n' "$out" | grep -q 'Config Validation Errors'; then
+    printf '%s\n' "$out" | sed -n '/Config Validation Errors/,/End Config Validation Errors/p'
+    exit 1
+fi
+echo "valid: $config"

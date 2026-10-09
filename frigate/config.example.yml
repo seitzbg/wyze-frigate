@@ -1,0 +1,58 @@
+# Frigate config for Wyze cameras served by the patched wyze-bridge.
+# Copy to frigate/config/config.yml, then replace the example camera with
+# yours. Stream names come from the bridge (see the README quickstart).
+mqtt:
+  enabled: false
+
+# OpenVINO on the CPU with the model bundled in the image. Works on x86-64
+# Intel and AMD CPUs. Use device: GPU for an Intel iGPU. For other hardware
+# see https://docs.frigate.video/configuration/object_detectors
+detectors:
+  ov:
+    type: openvino
+    device: CPU
+
+model:
+  width: 300
+  height: 300
+  input_tensor: nhwc
+  input_pixel_format: bgr
+  path: /openvino-model/ssdlite_mobilenet_v2.xml
+  labelmap_path: /openvino-model/coco_91cl_bkgr.txt
+
+objects:
+  track: [person, car, dog, cat]
+
+record:
+  enabled: true
+  continuous:
+    days: 7
+  motion:
+    days: 7
+  alerts:
+    retain:
+      days: 30
+  detections:
+    retain:
+      days: 30
+
+snapshots:
+  enabled: true
+  retain:
+    default: 30
+
+cameras:
+  front_door:                     # any name; the URL path is the bridge stream name
+    ffmpeg:
+      inputs:
+        # One input for detect and record keeps one connection to the
+        # bridge, which keeps the camera at full resolution.
+        - path: rtsp://{FRIGATE_BRIDGE_IP}:8554/front_door
+          roles: [detect, record]
+    detect:
+      fps: 5
+      # Set to the resolution measure-stream reports for this camera.
+      width: 2304
+      height: 1296
+
+version: 0.18-0
