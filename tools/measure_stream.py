@@ -48,8 +48,8 @@ class Frame:
 @dataclass
 class Capture:
     frames: list[Frame] = field(default_factory=list)
-    warnings: list[str] = field(default_factory=list)
-    errors: list[str] = field(default_factory=list)
+    warnings: list[tuple[float, str]] = field(default_factory=list)   # (arrival, line)
+    errors: list[tuple[float, str]] = field(default_factory=list)
     input_opened: bool = False
     has_video: bool = False
     exited: bool = False    # ffmpeg ended on its own before the deadline
@@ -84,7 +84,7 @@ def parse_line(line: str, t: float, cap: Capture) -> None:
     level = LEVEL_RE.search(line)
     if level:
         target = cap.warnings if level.group(1) == "warning" else cap.errors
-        target.append(redact(line.strip()))
+        target.append((t, redact(line.strip())))
 
 
 def build_command(ffmpeg: str, url: str) -> list[str]:
@@ -139,10 +139,15 @@ def _gaps(values: list[float]) -> list[float]:
 
 
 def summarize(cap: Capture, duration: float, warmup: float, expect: str | None = None) -> dict:
-    """Judge the frames that arrived in [first frame + warmup, + duration]."""
-    result: dict = {"warmup_s": warmup, "decode_errors": len(cap.errors),
-                    "decode_warnings": len(cap.warnings), "error_samples": cap.errors[:5]}
+    """Judge the frames and decoder messages in [first frame + warmup, + duration].
+
+    Decoder errors before the window are reported but do not fail the run:
+    joining a live H.264 stream mid-GOP logs errors until the first keyframe.
+    """
+    result: dict = {"warmup_s": warmup}
     if not cap.frames:
+        result.update(decode_errors=len(cap.errors), decode_warnings=len(cap.warnings),
+                      error_samples=[m for _, m in cap.errors[:5]])
         if cap.exited and cap.input_opened and not cap.has_video:
             outcome = "no-video"
         elif cap.exited:
@@ -156,6 +161,7 @@ def summarize(cap: Capture, duration: float, warmup: float, expect: str | None =
     complete = not cap.exited
     end = start + duration if complete else max(cap.end, start)
     window = [f for f in cap.frames if start <= f.arrival <= end]
+    errors = [m for t, m in cap.errors if start <= t <= end]
     arrivals = [f.arrival for f in window]
     # Edge gaps count too: a stall at the start or end of the window is a stall.
     arrival_gaps = _gaps(arrivals)
@@ -185,6 +191,10 @@ def summarize(cap: Capture, duration: float, warmup: float, expect: str | None =
         pts_gaps_over_150ms=sum(g > SMALL_GAP for g in pts_gaps),
         pts_gaps_over_500ms=sum(g > BIG_GAP for g in pts_gaps),
         pts_backwards=sum(g < 0 for g in pts_steps),
+        decode_errors=len(errors),
+        decode_errors_warmup=sum(t < start for t, _ in cap.errors),
+        decode_warnings=sum(start <= t <= end for t, _ in cap.warnings),
+        error_samples=errors[:5],
     )
     reasons = []
     if not complete:
@@ -195,8 +205,8 @@ def summarize(cap: Capture, duration: float, warmup: float, expect: str | None =
         reasons.append(f"delivery stalled for {result['arrival_gap_max_s']:.2f} s")
     if result["pts_gap_max_s"] and result["pts_gap_max_s"] > BIG_GAP:
         reasons.append(f"timestamp gap of {result['pts_gap_max_s']:.2f} s")
-    if cap.errors:
-        reasons.append(f"{len(cap.errors)} decoder errors")
+    if errors:
+        reasons.append(f"{len(errors)} decoder errors")
     if len(sizes) > 1:
         reasons.append("resolution changed during the window")
     if expect and result["resolution"] != expect:
@@ -230,7 +240,8 @@ def render(r: dict) -> str:
         f" >500 ms: {r['arrival_gaps_over_500ms']}",
         f"pts gaps     max {_seconds(r['pts_gap_max_s'])}; >150 ms: {r['pts_gaps_over_150ms']};"
         f" >500 ms: {r['pts_gaps_over_500ms']}; backwards: {r['pts_backwards']}",
-        f"decoder      {r['decode_errors']} errors, {r['decode_warnings']} warnings",
+        f"decoder      {r['decode_errors']} errors, {r['decode_warnings']} warnings"
+        f" ({r['decode_errors_warmup']} errors during warmup, not counted)",
     ]
     lines += [f"error        {e}" for e in r["error_samples"]]
     lines.append(f"verdict      {r['verdict']}" + (f": {'; '.join(r['reasons'])}" if r["reasons"] else ""))

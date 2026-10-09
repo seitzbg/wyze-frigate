@@ -65,12 +65,12 @@ class ParseTests(unittest.TestCase):
         ms.parse_line("[info]   Stream #0:0: Video: h264 (High), yuv420p, 2304x1296", 0.1, cap)
         self.assertTrue(cap.has_video)
 
-    def test_levels_collected(self):
+    def test_levels_collected_with_time(self):
         cap = ms.Capture()
         ms.parse_line("[h264 @ 0x1] [error] left block unavailable for requested intra mode", 1.0, cap)
-        ms.parse_line("[null @ 0x2] [warning] Non-monotonic DTS; previous: 5, current: 4", 1.0, cap)
-        self.assertEqual(len(cap.errors), 1)
-        self.assertEqual(len(cap.warnings), 1)
+        ms.parse_line("[null @ 0x2] [warning] Non-monotonic DTS; previous: 5, current: 4", 2.0, cap)
+        self.assertEqual([t for t, _ in cap.errors], [1.0])
+        self.assertEqual([t for t, _ in cap.warnings], [2.0])
 
     def test_redact(self):
         text = ("[error] rtsp://u:p@10.1.2.3:8554/x wyze://10.1.2.3?uid=ABC&enr=x%2Fy&mac=D03F27 "
@@ -129,6 +129,24 @@ class SummaryTests(unittest.TestCase):
     def test_expect_mismatch_fails(self):
         r = ms.summarize(cap_with(frames(clean_times()), end=12.0), 10, 2, expect="2304x1296")
         self.assertEqual(r["verdict"], "FAIL")
+
+    def test_errors_while_joining_do_not_fail(self):
+        # Joining a live H.264 stream mid-GOP logs errors until the first
+        # keyframe. Those land in the warmup, before the window opens.
+        cap = cap_with(frames(clean_times()), end=12.0)
+        cap.errors = [(0.3, "[h264] [error] Missing reference picture"), (0.4, "[h264] [error] top block unavailable")]
+        r = ms.summarize(cap, 10, 2)
+        self.assertEqual(r["verdict"], "PASS", r["reasons"])
+        self.assertEqual(r["decode_errors"], 0)
+        self.assertEqual(r["decode_errors_warmup"], 2)
+
+    def test_errors_inside_window_fail(self):
+        cap = cap_with(frames(clean_times()), end=12.0)
+        cap.errors = [(0.3, "[h264] [error] join"), (6.0, "[h264] [error] error while decoding MB 30 0")]
+        r = ms.summarize(cap, 10, 2)
+        self.assertEqual(r["verdict"], "FAIL")
+        self.assertEqual(r["decode_errors"], 1)
+        self.assertEqual(r["error_samples"], ["[h264] [error] error while decoding MB 30 0"])
 
     def test_backwards_pts_counted_not_gap(self):
         t = clean_times()
