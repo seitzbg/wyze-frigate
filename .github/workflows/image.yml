@@ -1,0 +1,136 @@
+name: image
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/wyze-bridge-patched
+
+jobs:
+  build:
+    name: build (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    # Each architecture builds on its own native runner, so the go2rtc
+    # patch tests and the smoke test run on real hardware for that arch.
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build (runs the go2rtc patch tests)
+        uses: docker/build-push-action@v7
+        with:
+          context: bridge
+          platforms: ${{ matrix.platform }}
+          load: true
+          tags: wyze-bridge-patched:ci
+
+      - name: Smoke test
+        run: |
+          docker run --rm --entrypoint /usr/local/bin/go2rtc wyze-bridge-patched:ci -version | tee version.txt
+          grep -q a7f9c64 version.txt
+          grep -q "${{ matrix.platform }}" version.txt
+          docker run --rm --entrypoint ls wyze-bridge-patched:ci \
+            /usr/share/doc/wyze-bridge-patched/LICENSE.wyze-bridge \
+            /usr/share/doc/wyze-bridge-patched/LICENSE.go2rtc \
+            /usr/share/doc/wyze-bridge-patched/SOURCES.txt
+
+      - name: Log in to GHCR
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push by digest
+        if: startsWith(github.ref, 'refs/tags/v')
+        id: push
+        uses: docker/build-push-action@v7
+        with:
+          context: bridge
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Save digest
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          mkdir -p digests
+          touch "digests/${DIGEST#sha256:}"
+
+      - uses: actions/upload-artifact@v7
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          name: digest-${{ matrix.runner }}
+          path: digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          path: digests
+          pattern: digest-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tag the multi-arch image
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          # shellcheck disable=SC2046
+          docker buildx imagetools create -t "$IMAGE:$tag" -t "$IMAGE:latest" \
+            $(printf "$IMAGE@sha256:%s " $(ls digests))
+          docker buildx imagetools inspect "$IMAGE:$tag"
+
+      - name: Build the source bundle
+        run: docker buildx build bridge --target source-bundle --output type=local,dest=dist
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          digest=$(docker buildx imagetools inspect "$IMAGE:$tag" --format '{{json .Manifest.Digest}}' | tr -d '"')
+          cat > notes.md <<NOTES
+          Image: \`$IMAGE:$tag\` (\`$digest\`), linux/amd64 and linux/arm64.
+
+          The image bundles docker-wyze-bridge (AGPL-3.0, unmodified) and a patched
+          go2rtc (MIT). Their complete source is attached below. License notices are
+          in \`/usr/share/doc/wyze-bridge-patched/\` inside the image.
+          NOTES
+          gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --notes-file notes.md

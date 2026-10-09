@@ -1,0 +1,32 @@
+name: checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  tools:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      - name: measure-stream tests
+        run: python3 -m unittest discover -s tools/tests -v
+      - name: Shell syntax
+        run: sh -n tools/validate-frigate-config
+
+  frigate-config:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Baseline config is valid
+        run: tools/validate-frigate-config frigate/config.example.yml
+      - name: NVIDIA config is valid
+        run: tools/validate-frigate-config frigate/nvidia/config.nvidia.yml ghcr.io/blakeblackshear/frigate:0.18.0-tensorrt
+      - name: The validator rejects a broken config
+        run: "! tools/validate-frigate-config tools/tests/fixtures/invalid-frigate-config.yml"
