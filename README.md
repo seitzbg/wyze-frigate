@@ -19,8 +19,11 @@ measurements.
 - A Wyze account with a password (see step 1) and a developer API key.
 - For Frigate: an x86-64 host for the CPU baseline, or an NVIDIA GPU for
   the [GPU setup](docs/nvidia.md). It can be the bridge host.
+- `curl` and `jq` for the commands below.
 - Python 3 and ffmpeg for `measure-stream`, or Docker to run it in a
   container.
+
+Run every command from the repository root unless a step says otherwise.
 
 ## Quickstart
 
@@ -35,42 +38,45 @@ measurements.
   the Wyze cloud last saw, and that copy can lag a long time after a camera
   moves ([why](docs/troubleshooting.md#the-stream-never-starts)).
 
-### 2. Start the bridge
+### 2. Firewall the bridge ports
+
+The bridge listens on 5080, 1984, 8554 and 8889, and port 1984 has no
+authentication in this bridge version. Restrict them before the bridge
+starts: [docs/network-and-security.md](docs/network-and-security.md) has a
+`ufw` example and a check to run from a machine that should be refused.
+
+### 3. Start the bridge
 
 ```sh
-cd bridge
-cp .env.example .env      # fill in the account, API key, BRIDGE_IP, BRIDGE_PASSWORD
-docker compose up -d
+cp bridge/.env.example bridge/.env   # fill in the account, API key, BRIDGE_IP, BRIDGE_PASSWORD
+docker compose -f bridge/docker-compose.yml up -d
 ```
 
-Then firewall it. Port 1984 has no authentication in this bridge version.
-See [docs/network-and-security.md](docs/network-and-security.md).
-
-### 3. Find the stream names
+### 4. Find the stream names
 
 ```sh
-curl -s -u "wyze:$BRIDGE_PASSWORD" http://BRIDGE_HOST:5080/api/cameras \
-  | jq '.[] | {name, model, fw_version}'
+curl -s -u wyze http://BRIDGE_HOST:5080/api/cameras | jq '.[] | {name, model, fw_version}'
 ```
 
+curl asks for the password: the `BRIDGE_PASSWORD` from `bridge/.env`.
 `name` is the stream name, served at `rtsp://BRIDGE_HOST:8554/<name>`.
 
-### 4. Configure and start Frigate
+### 5. Configure and start Frigate
 
 ```sh
-cd ../frigate
-cp .env.example .env      # set FRIGATE_BRIDGE_IP to the bridge host's LAN IP
-mkdir -p config
-cp config.example.yml config/config.yml   # replace the example camera with yours
-../tools/validate-frigate-config config/config.yml
-docker compose up -d
-docker logs frigate 2>&1 | grep -A1 'User: admin'   # first-start admin password
+cp frigate/.env.example frigate/.env   # set FRIGATE_BRIDGE_IP to the bridge host's LAN IP
+mkdir -p frigate/config
+cp frigate/config.example.yml frigate/config/config.yml   # replace the example camera with yours
+tools/validate-frigate-config frigate/config/config.yml
+docker compose -f frigate/docker-compose.yml up -d
+docker logs frigate 2>&1 | grep -A1 'User: admin'   # admin password, printed on first start only
 ```
 
 The UI is at `https://FRIGATE_HOST:8971` (self-signed certificate). For an
-NVIDIA GPU, follow [docs/nvidia.md](docs/nvidia.md) instead.
+NVIDIA GPU, swap in the GPU config and compose override from
+[docs/nvidia.md](docs/nvidia.md) at this step.
 
-### 5. Measure each camera
+### 6. Measure each camera
 
 With Frigate running:
 
@@ -110,7 +116,7 @@ real stream path, measuring it, and diagnosing a failure.
 ## Building the image yourself
 
 ```sh
-cd bridge && docker compose build
+docker compose -f bridge/docker-compose.yml build
 ```
 
 The build clones go2rtc at a pinned commit, applies the patches, runs their

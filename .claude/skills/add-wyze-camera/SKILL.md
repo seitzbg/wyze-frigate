@@ -66,19 +66,23 @@ override).
 python3 tools/measure_stream.py rtsp://BRIDGE_HOST:8554/CAMERA --json
 ```
 
-Add `--expect WxH` when `docs/models.md` lists a verified resolution for
-the model. Without host ffmpeg, build `tools/Dockerfile` and run it with
-`--network host`. The run takes about five minutes.
+When `docs/models.md` has verified measurements for the model, add
+`--expect WxH --expect-fps N` with its resolution and frame rate (the Bulb
+Cam: `--expect 2304x1296 --expect-fps 20`). Without host ffmpeg, build
+`tools/Dockerfile` and run it with `--network host`. The run takes about
+five minutes.
 
-Done when you have the JSON. `PASS` means the resolution held, no delivery
-or timestamp gap exceeded 500 ms, and the decoder logged no errors.
+Done when you have the JSON. `PASS` means the resolution held, frames kept
+arriving (no gap over 500 ms), timestamps advanced without gaps, at least
+90% of the nominal frame rate arrived, and the decoder logged no errors
+after the warmup.
 
 ## 6. Diagnose a FAIL
 
 Match the `reasons` against `docs/troubleshooting.md` and run the check it
-names for that symptom. Each cause there has one distinguishing check:
-delivery stalls with continuous timestamps, timestamp gaps, decoder errors,
-640x360, and no frames are separate branches. Change one thing, then
+names for that symptom. "No frames for N s", timestamp gaps, a low
+delivered rate, decoder errors, 640x360, and no frames at all are separate
+branches, each with its own check. Change one thing, then
 measure again. Done when the run passes, or you can name the cause and show
 the measurement that points to it.
 
@@ -97,4 +101,5 @@ foliage, a mask for the timestamp. Validate and restart as in step 3.
 Offer to open a model report (`.github/ISSUE_TEMPLATE/model-report.yml`)
 for any model not yet verified in `docs/models.md`. It carries the model
 code, firmware, host architecture, path, image tag and the `--json` output,
-which is already redacted. Show the user the full text before it is posted.
+which the tool has scrubbed of addresses, credentials and camera names.
+Show the user the full text before it is posted.

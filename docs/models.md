@@ -88,5 +88,7 @@ python3 tools/measure_stream.py rtsp://BRIDGE_HOST:8554/CAMERA --json
 ```
 
 Then open a model report issue with the model code, firmware, path and the
-JSON. The tool's output is already redacted. Do not paste anything else from
-your system.
+JSON. The tool scrubs the stream URL's host, credentials and camera name,
+and anything shaped like an address, MAC or Wyze key from the messages it
+reports. Read the JSON before you paste it, and paste nothing else from your
+system.

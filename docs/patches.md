@@ -109,13 +109,24 @@ numbers.
    resolution, add the model to the condition in
    `0001-wyze-hlbc-resolution.patch`, or to `is2K()` if the camera wants
    code 3.
-4. Build locally (`docker compose build` in `bridge/`) and restart the
-   bridge.
+4. Build locally and recreate the container so the new image actually
+   runs. A plain `docker compose restart` keeps the old one.
+
+   ```sh
+   docker compose -f bridge/docker-compose.yml build
+   docker compose -f bridge/docker-compose.yml up -d --force-recreate
+   docker exec wyze-bridge sha256sum /usr/local/bin/go2rtc   # must differ from bridge/go2rtc-amd64.sha256
+   ```
+
+   The new build runs for every camera on this bridge, and the widened gate
+   applies to every camera of that model. Ask whoever relies on those
+   cameras first.
 5. Repeat the two runs on the camera under test, and one run on a camera
    that was already working. The second run checks the change broke nothing.
 6. Keep the change only if the largest arrival gap and the count of gaps
    over 500 ms clearly improve, and the other camera is unchanged.
-7. Roll back by reverting the patch and rebuilding, or by going back to the
-   release image.
+7. Roll back by reverting the patch, then rebuilding and recreating as in
+   step 4, or by pulling the release image
+   (`docker compose -f bridge/docker-compose.yml pull`) and recreating.
 8. Open a model report with both sets of JSON so the gate can be widened
    upstream.

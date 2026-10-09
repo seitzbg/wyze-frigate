@@ -1,12 +1,12 @@
 # syntax=docker/dockerfile:1
 # Exports YOLOv9 to ONNX for Frigate's onnx detector. Frigate does not
 # download this model itself. Adapted from Frigate's detector docs, with the
-# yolov9 source and the weights pinned. Run from the frigate/ directory:
+# yolov9 source and the weights pinned. Run from the repository root:
 #
-#   docker build . --build-arg IMG_SIZE=320 --output ./config/model_cache \
-#       -f nvidia/model-export.Dockerfile
+#   docker build frigate --build-arg IMG_SIZE=320 --output frigate/config/model_cache \
+#       -f frigate/nvidia/model-export.Dockerfile
 #
-# Result: config/model_cache/yolov9-t-320.onnx (about 8 MB). The checksum
+# Result: frigate/config/model_cache/yolov9-t-320.onnx (about 8 MB). The checksum
 # below is for the tiny (t) weights. Other sizes (s, m, c, e) are more
 # accurate and slower; to use one, set MODEL_SIZE and replace the checksum
 # with that file's sha256.

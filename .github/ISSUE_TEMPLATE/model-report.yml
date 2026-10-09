@@ -7,8 +7,9 @@ body:
     attributes:
       value: |
         Thanks for measuring a camera. Run `tools/measure_stream.py` for 300 s
-        with Frigate attached, then paste its `--json` output below. That output
-        is already redacted. Please do not paste anything else from your system.
+        with Frigate attached, then paste its `--json` output below. The tool
+        scrubs addresses, credentials and camera names from its messages, but
+        read it before you paste. Please paste nothing else from your system.
   - type: input
     id: model_code
     attributes:

@@ -7,24 +7,26 @@ GPU, its driver, and the
 
 ## 1. Export the model
 
-Frigate does not download YOLOv9 for you. Build it once from the `frigate/`
-directory:
+Frigate does not download YOLOv9 for you. Build it once, from the
+repository root like every command here:
 
 ```sh
-docker build . --build-arg IMG_SIZE=320 --output ./config/model_cache \
-    -f nvidia/model-export.Dockerfile
+docker build frigate --build-arg IMG_SIZE=320 --output frigate/config/model_cache \
+    -f frigate/nvidia/model-export.Dockerfile
 ```
 
-This writes `config/model_cache/yolov9-t-320.onnx` (about 8 MB). The build
-pins the YOLOv9 source and the weights' checksum. It downloads PyTorch, so
+This writes `frigate/config/model_cache/yolov9-t-320.onnx` (about 8 MB). The build
+pins the YOLOv9 source and the weights' checksum. Its Python packages are not
+pinned beyond what Frigate's own recipe pins, and it downloads PyTorch, so
 expect a few GB and several minutes. Keep the file: it lives in your config
 directory, not in the image.
 
 ## 2. Use the NVIDIA config
 
 ```sh
-cp nvidia/config.nvidia.yml config/config.yml   # then edit the cameras
-../tools/validate-frigate-config config/config.yml ghcr.io/blakeblackshear/frigate:0.18.0-tensorrt
+cp frigate/.env.example frigate/.env   # set FRIGATE_BRIDGE_IP
+cp frigate/nvidia/config.nvidia.yml frigate/config/config.yml   # then edit the cameras
+tools/validate-frigate-config frigate/config/config.yml ghcr.io/blakeblackshear/frigate:0.18.0-tensorrt
 ```
 
 It differs from the baseline in three places: the `onnx` detector, the YOLOv9
@@ -34,7 +36,7 @@ It differs from the baseline in three places: the `onnx` detector, the YOLOv9
 ## 3. Start with the GPU override
 
 ```sh
-docker compose -f docker-compose.yml -f nvidia/docker-compose.nvidia.yml up -d
+docker compose -f frigate/docker-compose.yml -f frigate/nvidia/docker-compose.nvidia.yml up -d
 ```
 
 The override switches to the `-tensorrt` image, raises `shm_size` to 1 GB,

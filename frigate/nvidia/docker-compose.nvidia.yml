@@ -1,5 +1,5 @@
-# NVIDIA GPU variant. Use it on top of the base file:
-#   docker compose -f docker-compose.yml -f nvidia/docker-compose.nvidia.yml up -d
+# NVIDIA GPU variant. Use it on top of the base file, from the repository root:
+#   docker compose -f frigate/docker-compose.yml -f frigate/nvidia/docker-compose.nvidia.yml up -d
 services:
   frigate:
     image: ghcr.io/blakeblackshear/frigate:0.18.0-tensorrt

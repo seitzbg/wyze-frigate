@@ -33,7 +33,8 @@ docker build bridge/                                         # builds the image 
 - **The user's containers are theirs.** Ask before restarting or recreating
   the bridge or Frigate, and before rebooting a camera.
 - **Reports carry numbers, never identifiers.** Issues, commits and chat get
-  the model code, firmware, path and `measure-stream --json` output.
+  the model code, firmware, path and `measure-stream --json` output, read
+  through once before posting.
   IP addresses, URLs, MAC addresses, `uid`/`enr` values, camera names,
   `.env` contents and `bridge/config/` stay on the user's machine.
 - **One Wi-Fi kick at most.** Repeated de-auths pushed a camera into pairing
