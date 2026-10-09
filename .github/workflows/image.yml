@@ -123,11 +123,13 @@ jobs:
           arches=""
           for d in digests/*; do
             ref="$IMAGE@sha256:$(basename "$d")"
-            docker pull -q "$ref" >/dev/null
-            arch=$(docker image inspect --format '{{.Architecture}}' "$ref")
+            # Each pushed digest is an index: one platform plus its attestation.
+            arch=$(docker buildx imagetools inspect --raw "$ref" \
+              | jq -r '[.manifests[].platform.architecture | select(. != "unknown")] | first')
             arches="$arches $arch"
             if [ "$arch" = amd64 ]; then
-              id=$(docker create "$ref")
+              docker pull -q --platform linux/amd64 "$ref" >/dev/null
+              id=$(docker create --platform linux/amd64 "$ref")
               docker cp "$id:/usr/local/bin/go2rtc" ./go2rtc
               docker rm "$id" >/dev/null
               sha256sum -c bridge/go2rtc-amd64.sha256
