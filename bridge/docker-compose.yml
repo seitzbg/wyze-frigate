@@ -1,0 +1,16 @@
+services:
+  wyze-bridge:
+    # Prebuilt image. `docker compose build` builds it from ./Dockerfile instead.
+    image: ghcr.io/seitzbg/wyze-bridge-patched:4.5.0-1
+    build: .
+    container_name: wyze-bridge
+    restart: unless-stopped
+    # Host networking is required. Native TUTK streams fail to connect behind
+    # Docker's bridge NAT, and RTSP/WebRTC need real host ports. Read
+    # docs/network-and-security.md before you run this.
+    network_mode: host
+    env_file: .env
+    volumes:
+      # Login tokens and camera details (IPs, MACs, keys). Keep it private.
+      - ./config:/config
+      - ./media:/media
