@@ -1,0 +1,13 @@
+# Secrets and runtime state. Never commit these.
+.env
+bridge/config/
+bridge/media/
+frigate/config/
+frigate/storage/
+# Measurement artifacts can contain camera details.
+*.pcap
+*.pcapng
+*.log
+measurements/
+dist/
+__pycache__/
