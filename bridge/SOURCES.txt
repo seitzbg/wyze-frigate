@@ -1,0 +1,12 @@
+This image redistributes docker-wyze-bridge unmodified and replaces its
+go2rtc binary with a patched build.
+
+docker-wyze-bridge  AGPL-3.0  https://github.com/IDisposable/docker-wyze-bridge
+  tag v4.5.0
+  image idisposablegithub365/wyze-bridge:4.5.0@sha256:708903d2882c76966ecb29763a075372d89773aa6796d0aab70f04369cc6d521
+go2rtc              MIT       https://github.com/AlexxIT/go2rtc
+  commit a7f9c64a1591ef984e9a595c66b5e89ace3c6221 (head of PR #2324)
+  plus the patches in patches/ and a WebRTC profile default (see the Dockerfile)
+
+Complete source for both is attached to every release at
+https://github.com/seitzbg/wyze-frigate/releases

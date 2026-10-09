@@ -1,0 +1,676 @@
+diff --git a/pkg/tutk/dtls/conn_dtls.go b/pkg/tutk/dtls/conn_dtls.go
+index c1d5f6c..6af6744 100644
+--- a/pkg/tutk/dtls/conn_dtls.go
++++ b/pkg/tutk/dtls/conn_dtls.go
+@@ -69,15 +69,19 @@ const (
+ )
+ 
+ type DTLSConn struct {
+-	conn    *net.UDPConn
+-	addr    *net.UDPAddr
+-	frames  *tutk.FrameHandler
+-	err     error
+-	verbose bool
+-	ctx     context.Context
+-	cancel  context.CancelFunc
+-	wg      sync.WaitGroup
+-	mu      sync.RWMutex
++	conn     *net.UDPConn
++	addr     *net.UDPAddr
++	frames   *tutk.FrameHandler
++	err      error
++	verbose  bool
++	ctx      context.Context
++	cancel   context.CancelFunc
++	wg       sync.WaitGroup
++	mu       sync.RWMutex
++	avMu     sync.Mutex
++	ackMu    sync.Mutex
++	writeMu  sync.Mutex
++	reliable reliableMedia
+ 
+ 	// DTLS
+ 	clientConn *dtls.Conn
+@@ -167,19 +171,28 @@ func DialDTLS(host string, port int, uid, authKey, enr string, verbose bool) (*D
+ 	return c, nil
+ }
+ 
+-func (c *DTLSConn) AVClientStart(timeout time.Duration) error {
++func (c *DTLSConn) AVClientStart(timeout time.Duration, resend bool) error {
++	if resend {
++		c.reliable.enable()
++	}
++	c.mu.RLock()
++	conn := c.clientConn
++	c.mu.RUnlock()
++	if conn == nil {
++		return net.ErrClosed
++	}
+ 	randomID := tutk.GenSessionID()
+-	pkt1 := c.msgAVLogin(magicAVLogin1, 570, 0x0001, randomID)
+-	pkt2 := c.msgAVLogin(magicAVLogin2, 572, 0x0000, randomID)
++	pkt1 := c.msgAVLogin(magicAVLogin1, 570, 0x0001, randomID, resend)
++	pkt2 := c.msgAVLogin(magicAVLogin2, 572, 0x0000, randomID, resend)
+ 	pkt2[20]++ // pkt2 has randomID incremented by 1
+ 
+-	if _, err := c.clientConn.Write(pkt1); err != nil {
++	if _, err := conn.Write(pkt1); err != nil {
+ 		return fmt.Errorf("av login 1 failed: %w", err)
+ 	}
+ 
+ 	time.Sleep(10 * time.Millisecond)
+ 
+-	if _, err := c.clientConn.Write(pkt2); err != nil {
++	if _, err := conn.Write(pkt2); err != nil {
+ 		return fmt.Errorf("av login 2 failed: %w", err)
+ 	}
+ 
+@@ -195,14 +208,19 @@ func (c *DTLSConn) AVClientStart(timeout time.Duration) error {
+ 			if len(data) >= 32 && binary.LittleEndian.Uint16(data) == magicAVLoginResp {
+ 				c.hasTwoWayStreaming = data[31] == 1
+ 
+-				ack := c.msgACK()
+-				c.clientConn.Write(ack)
++				if err := c.sendACK(conn); err != nil {
++					return err
++				}
+ 
+ 				// Start ACK sender for continuous streaming
+ 				c.wg.Add(1)
+ 				go func() {
+ 					defer c.wg.Done()
+-					ackTicker := time.NewTicker(100 * time.Millisecond)
++					ackInterval := 100 * time.Millisecond
++					if resend {
++						ackInterval = 20 * time.Millisecond
++					}
++					ackTicker := time.NewTicker(ackInterval)
+ 					defer ackTicker.Stop()
+ 
+ 					for {
+@@ -210,9 +228,9 @@ func (c *DTLSConn) AVClientStart(timeout time.Duration) error {
+ 						case <-c.ctx.Done():
+ 							return
+ 						case <-ackTicker.C:
+-							if c.clientConn != nil {
+-								ack := c.msgACK()
+-								c.clientConn.Write(ack)
++							if err := c.sendACK(conn); err != nil {
++								c.fail(err)
++								return
+ 							}
+ 						}
+ 					}
+@@ -357,6 +375,8 @@ func (c *DTLSConn) Write(data []byte) error {
+ }
+ 
+ func (c *DTLSConn) WriteDTLS(payload []byte, channel byte) error {
++	c.writeMu.Lock()
++	defer c.writeMu.Unlock()
+ 	var frame []byte
+ 	if c.isCC51 {
+ 		frame = c.msgTxDataCC51(payload, channel)
+@@ -433,8 +453,15 @@ func (c *DTLSConn) WriteAndWaitIOCtrl(payload []byte, match func([]byte) bool, t
+ 				return nil, io.EOF
+ 			}
+ 
+-			ack := c.msgACK()
+-			c.clientConn.Write(ack)
++			c.mu.RLock()
++			conn := c.clientConn
++			c.mu.RUnlock()
++			if conn == nil {
++				return nil, net.ErrClosed
++			}
++			if err := c.sendACK(conn); err != nil {
++				return nil, err
++			}
+ 
+ 			if match(data) {
+ 				return data, nil
+@@ -490,6 +517,8 @@ func (c *DTLSConn) Close() error {
+ }
+ 
+ func (c *DTLSConn) Error() error {
++	c.mu.RLock()
++	defer c.mu.RUnlock()
+ 	if c.err != nil {
+ 		return c.err
+ 	}
+@@ -582,6 +611,9 @@ func (c *DTLSConn) connect() error {
+ 
+ func (c *DTLSConn) worker() {
+ 	defer c.wg.Done()
++	c.mu.RLock()
++	conn := c.clientConn
++	c.mu.RUnlock()
+ 
+ 	buf := make([]byte, 2048)
+ 
+@@ -592,9 +624,9 @@ func (c *DTLSConn) worker() {
+ 		default:
+ 		}
+ 
+-		n, err := c.clientConn.Read(buf)
++		n, err := conn.Read(buf)
+ 		if err != nil {
+-			c.err = err
++			c.fail(err)
+ 			return
+ 		}
+ 
+@@ -603,6 +635,29 @@ func (c *DTLSConn) worker() {
+ 		}
+ 
+ 		data := buf[:n]
++		packets, stats, handled, err := c.reliable.handle(data, time.Now())
++		if err != nil {
++			c.fail(err)
++			return
++		}
++		if stats != nil {
++			if _, err := conn.Write(stats); err != nil {
++				c.fail(err)
++				return
++			}
++		}
++		for _, packet := range packets {
++			c.frames.Handle(packet)
++		}
++		if handled {
++			if data[0] == 0x0c && data[1]&5 != 0 {
++				if err := c.sendACK(conn); err != nil {
++					c.fail(err)
++					return
++				}
++			}
++			continue
++		}
+ 		magic := binary.LittleEndian.Uint16(data)
+ 
+ 		if c.verbose {
+@@ -617,7 +672,8 @@ func (c *DTLSConn) worker() {
+ 			c.queue(c.rawCmd, data)
+ 
+ 		case protoVersion:
+-			// Seq-Tracking
++			// Seq-Tracking for sessions without media retransmission.
++			c.avMu.Lock()
+ 			if len(data) >= 8 {
+ 				seq := binary.LittleEndian.Uint16(data[4:])
+ 				if !c.rxSeqInit {
+@@ -627,6 +683,7 @@ func (c *DTLSConn) worker() {
+ 					c.rxSeqEnd = seq
+ 				}
+ 			}
++			c.avMu.Unlock()
+ 			c.queue(c.rawCmd, data)
+ 
+ 		case magicACK:
+@@ -802,14 +859,18 @@ func (c *DTLSConn) msgSession() []byte {
+ 	return b
+ }
+ 
+-func (c *DTLSConn) msgAVLogin(magic uint16, size int, flags uint16, randomID []byte) []byte {
++func (c *DTLSConn) msgAVLogin(magic uint16, size int, flags uint16, randomID []byte, resend bool) []byte {
+ 	b := make([]byte, size)
+ 	binary.LittleEndian.PutUint16(b, magic)
+ 	binary.LittleEndian.PutUint16(b[2:], protoVersion)
+ 	binary.LittleEndian.PutUint16(b[16:], uint16(size-24)) // payload size
+ 	binary.LittleEndian.PutUint16(b[18:], flags)
+ 	copy(b[20:], randomID[:4])
+-	copy(b[24:], "admin")                               // username
++	copy(b[24:], "admin") // username
++	// Resend flag after the two 257-byte credential fields.
++	if resend {
++		b[538] = 1
++	}
+ 	copy(b[280:], c.enr)                                // password/ENR
+ 	binary.LittleEndian.PutUint32(b[540:], 4)           // security_mode ?
+ 	binary.LittleEndian.PutUint32(b[552:], defaultCaps) // capabilities
+@@ -915,6 +976,8 @@ func (c *DTLSConn) msgTxDataCC51(payload []byte, channel byte) []byte {
+ }
+ 
+ func (c *DTLSConn) msgACK() []byte {
++	c.avMu.Lock()
++	defer c.avMu.Unlock()
+ 	c.ackFlags++
+ 	b := make([]byte, 24)
+ 	binary.LittleEndian.PutUint16(b[0:], magicACK)     // 0x0009
+@@ -946,6 +1009,8 @@ func (c *DTLSConn) msgKeepalive(incoming []byte) []byte {
+ }
+ 
+ func (c *DTLSConn) msgIOCtrl(payload []byte) []byte {
++	c.avMu.Lock()
++	defer c.avMu.Unlock()
+ 	b := make([]byte, 40+len(payload))
+ 	binary.LittleEndian.PutUint16(b, protoVersion)     // magic
+ 	binary.LittleEndian.PutUint16(b[2:], protoVersion) // version
+@@ -985,3 +1050,31 @@ func hexDump(data []byte) string {
+ 	}
+ 	return result
+ }
++
++func (c *DTLSConn) fail(err error) {
++	c.mu.Lock()
++	if c.err == nil {
++		c.err = err
++	}
++	c.mu.Unlock()
++	c.cancel()
++}
++
++func (c *DTLSConn) sendACK(conn *dtls.Conn) error {
++	c.ackMu.Lock()
++	defer c.ackMu.Unlock()
++	ack, err := c.reliable.ack(time.Now())
++	if err != nil {
++		return err
++	}
++	if ack == nil {
++		ack = c.msgACK()
++	} else {
++		c.avMu.Lock()
++		binary.LittleEndian.PutUint32(ack[4:], c.avSeq)
++		c.avSeq++
++		c.avMu.Unlock()
++	}
++	_, err = conn.Write(ack)
++	return err
++}
+diff --git a/pkg/tutk/dtls/reliable.go b/pkg/tutk/dtls/reliable.go
+new file mode 100644
+index 0000000..7c588e9
+--- /dev/null
++++ b/pkg/tutk/dtls/reliable.go
+@@ -0,0 +1,179 @@
++package dtls
++
++import (
++	"encoding/binary"
++	"errors"
++	"sync"
++	"time"
++)
++
++const (
++	// Keep selective ACKs within one DTLS record and bound retained media.
++	mediaWindow  = 512
++	mediaTimeout = 2 * time.Second
++)
++
++var errMediaGap = errors.New("tutk: media retransmission window exhausted")
++
++// reliableMedia orders the shared audio/video packet counter before handing
++// fragments to FrameHandler. Retransmissions have new DTLS record numbers but
++// retain their inner packet counter, with channels 4/6/8 replacing 3/5/7.
++type reliableMedia struct {
++	mu                                      sync.Mutex
++	enabled                                 bool
++	pending                                 map[uint16][]byte
++	next, highest, ackBase, ioSeq, ackCount uint16
++	started                                 bool
++	gapSince                                time.Time
++	statsSeq, statsCount                    uint16
++}
++
++func (r *reliableMedia) enable() {
++	r.mu.Lock()
++	defer r.mu.Unlock()
++	r.enabled = true
++	r.pending = make(map[uint16][]byte)
++	r.highest, r.ackBase, r.ioSeq = 0xffff, 0xffff, 0xffff
++}
++
++func (r *reliableMedia) handle(data []byte, now time.Time) (packets [][]byte, stats []byte, handled bool, err error) {
++	r.mu.Lock()
++	defer r.mu.Unlock()
++	if !r.enabled || len(data) < 8 {
++		return
++	}
++	r.statsCount++
++	// Extended media packets carry the same statistics request as 0x080a.
++	// Echo it promptly: the sender uses this response to estimate retransmit RTT.
++	if (data[0] == 0x0c || data[0] == 0x0a) && data[1]&8 != 0 && len(data) >= 16 {
++		stats = r.statistics(data)
++	}
++	if data[0] == 0x0a {
++		handled = true
++		return
++	}
++	if data[0] != 0x0c {
++		return
++	}
++	offset := 16 // outer header plus FEC header
++	if data[1]&8 != 0 {
++		offset += 8
++	}
++	if len(data) < offset+20 {
++		handled = true
++		return
++	}
++	inner := data[offset:]
++	switch inner[0] {
++	case 0:
++		seq := binary.LittleEndian.Uint16(inner[2:])
++		if r.ioSeq == 0xffff || int16(seq-r.ioSeq) > 0 {
++			r.ioSeq = seq
++		}
++		return
++	case 0x0c:
++		// FEC parity is optional when selective retransmission repairs losses.
++		handled = true
++		return
++	case 3, 4, 5, 6, 7, 8:
++	default:
++		return
++	}
++	handled = true
++	if int(binary.LittleEndian.Uint16(inner[8:])) != len(inner)-20 {
++		return
++	}
++	seq := binary.LittleEndian.Uint16(inner[2:])
++	if int16(seq-r.next) < 0 {
++		return
++	} // already emitted retransmission
++	if uint16(seq-r.next) >= mediaWindow {
++		err = errMediaGap
++		return
++	}
++	if _, exists := r.pending[seq]; exists {
++		return
++	}
++	packet := make([]byte, 8+len(inner))
++	copy(packet, data[:8])
++	copy(packet[8:], inner)
++	packet[0], packet[1] = inner[0], inner[1]
++	if packet[0]&1 == 0 {
++		packet[0]--
++		packet[8]--
++	}
++	r.pending[seq] = packet
++	if !r.started || int16(seq-r.highest) > 0 {
++		r.highest = seq
++		r.started = true
++	}
++	previous := r.next
++	for {
++		packet, exists := r.pending[r.next]
++		if !exists {
++			break
++		}
++		packets = append(packets, packet)
++		delete(r.pending, r.next)
++		r.next++
++	}
++	if len(r.pending) == 0 {
++		r.gapSince = time.Time{}
++	} else if r.gapSince.IsZero() || previous != r.next {
++		r.gapSince = now
++	}
++	return
++}
++
++// ack lists missing packet counters as offsets from ackBase. Advancing the
++// base past an unresolved gap would let the sender discard the missing data.
++func (r *reliableMedia) ack(now time.Time) ([]byte, error) {
++	r.mu.Lock()
++	defer r.mu.Unlock()
++	if !r.enabled {
++		return nil, nil
++	}
++	if !r.gapSince.IsZero() && now.Sub(r.gapSince) >= mediaTimeout {
++		return nil, errMediaGap
++	}
++	var missing []uint16
++	if r.started {
++		for seq := r.next; seq != r.highest+1; seq++ {
++			if _, exists := r.pending[seq]; !exists {
++				missing = append(missing, seq-r.ackBase)
++			}
++		}
++	}
++	b := make([]byte, max(24, 22+2*len(missing)))
++	b[0] = 9
++	binary.LittleEndian.PutUint16(b[2:], protoVersion)
++	binary.LittleEndian.PutUint16(b[8:], r.ackBase)
++	binary.LittleEndian.PutUint16(b[10:], r.highest)
++	binary.LittleEndian.PutUint16(b[12:], r.ioSeq)
++	binary.LittleEndian.PutUint16(b[14:], uint16(len(missing)))
++	binary.LittleEndian.PutUint16(b[18:], r.ackCount)
++	binary.LittleEndian.PutUint16(b[20:], uint16(now.UnixMilli()))
++	for i, seq := range missing {
++		binary.LittleEndian.PutUint16(b[22+2*i:], seq)
++	}
++	r.ackCount++
++	r.ackBase = r.next - 1
++	return b, nil
++}
++
++func (r *reliableMedia) statistics(data []byte) []byte {
++	seq := binary.LittleEndian.Uint16(data[4:])
++	expected := seq - r.statsSeq
++	b := make([]byte, 20)
++	b[0] = 11
++	binary.LittleEndian.PutUint16(b[2:], protoVersion)
++	copy(b[8:10], data[8:10])
++	binary.LittleEndian.PutUint16(b[10:], expected)
++	binary.LittleEndian.PutUint16(b[12:], r.statsCount)
++	if expected > r.statsCount {
++		binary.LittleEndian.PutUint16(b[14:], uint16(uint32(expected-r.statsCount)*100/uint32(expected)))
++	}
++	r.statsSeq = seq
++	r.statsCount = 0
++	return b
++}
+diff --git a/pkg/tutk/dtls/reliable_test.go b/pkg/tutk/dtls/reliable_test.go
+new file mode 100644
+index 0000000..f74861d
+--- /dev/null
++++ b/pkg/tutk/dtls/reliable_test.go
+@@ -0,0 +1,191 @@
++package dtls
++
++import (
++	"encoding/binary"
++	"sync"
++	"testing"
++	"time"
++
++	"github.com/stretchr/testify/require"
++)
++
++func wrappedMedia(seq uint16, channel, flags byte, payload string) []byte {
++	offset := 16
++	if flags&8 != 0 {
++		offset += 8
++	}
++	b := make([]byte, offset+20+len(payload))
++	b[0], b[1] = 12, flags
++	binary.LittleEndian.PutUint16(b[2:], protoVersion)
++	binary.LittleEndian.PutUint16(b[4:], seq)
++	b[offset], b[offset+1] = channel, flags&1
++	binary.LittleEndian.PutUint16(b[offset+2:], seq)
++	binary.LittleEndian.PutUint16(b[offset+4:], 1)
++	binary.LittleEndian.PutUint16(b[offset+8:], uint16(len(payload)))
++	copy(b[offset+20:], payload)
++	return b
++}
++
++func TestReliableMediaRetransmission(t *testing.T) {
++	var r reliableMedia
++	r.enable()
++	now := time.Unix(100, 0)
++	packets, _, handled, err := r.handle(wrappedMedia(0, 5, 0, "first"), now)
++	require.NoError(t, err)
++	require.True(t, handled)
++	require.Len(t, packets, 1)
++	packets, _, _, err = r.handle(wrappedMedia(2, 7, 1, "last"), now)
++	require.NoError(t, err)
++	require.Empty(t, packets)
++	ack, err := r.ack(now)
++	require.NoError(t, err)
++	require.Equal(t, uint16(0xffff), binary.LittleEndian.Uint16(ack[8:]))
++	require.Equal(t, uint16(2), binary.LittleEndian.Uint16(ack[10:]))
++	require.Equal(t, uint16(1), binary.LittleEndian.Uint16(ack[14:]))
++	require.Equal(t, uint16(2), binary.LittleEndian.Uint16(ack[22:]))
++	ack, err = r.ack(now.Add(20 * time.Millisecond))
++	require.NoError(t, err)
++	require.Equal(t, uint16(0), binary.LittleEndian.Uint16(ack[8:]))
++	require.Equal(t, uint16(1), binary.LittleEndian.Uint16(ack[22:]))
++	packets, _, _, err = r.handle(wrappedMedia(1, 6, 4, "resent"), now.Add(30*time.Millisecond))
++	require.NoError(t, err)
++	require.Len(t, packets, 2)
++	require.Equal(t, byte(5), packets[0][0])
++	require.Equal(t, byte(5), packets[0][8])
++	require.Equal(t, "resent", string(packets[0][28:]))
++	require.Equal(t, "last", string(packets[1][28:]))
++	packets, _, _, err = r.handle(wrappedMedia(1, 6, 4, "duplicate"), now.Add(40*time.Millisecond))
++	require.NoError(t, err)
++	require.Empty(t, packets)
++	ack, err = r.ack(now.Add(50 * time.Millisecond))
++	require.NoError(t, err)
++	require.Zero(t, binary.LittleEndian.Uint16(ack[14:]))
++}
++
++func TestReliableMediaWrapAndMultipleLosses(t *testing.T) {
++	var r reliableMedia
++	r.enable()
++	r.next = 65534
++	r.highest = 65533
++	r.ackBase = 65533
++	r.started = true
++	now := time.Now()
++	packets, _, _, err := r.handle(wrappedMedia(1, 3, 0, "one"), now)
++	require.NoError(t, err)
++	require.Empty(t, packets)
++	ack, err := r.ack(now)
++	require.NoError(t, err)
++	require.Equal(t, uint16(3), binary.LittleEndian.Uint16(ack[14:]))
++	for i, want := range []uint16{1, 2, 3} {
++		require.Equal(t, want, binary.LittleEndian.Uint16(ack[22+i*2:]))
++	}
++	for _, seq := range []uint16{65535, 0} {
++		packets, _, _, err = r.handle(wrappedMedia(seq, 4, 4, "audio"), now)
++		require.NoError(t, err)
++		require.Empty(t, packets)
++	}
++	packets, _, _, err = r.handle(wrappedMedia(65534, 4, 4, "first"), now)
++	require.NoError(t, err)
++	require.Len(t, packets, 4)
++	for _, p := range packets {
++		require.Equal(t, byte(3), p[0])
++	}
++}
++
++func TestReliableMediaBoundedLoss(t *testing.T) {
++	now := time.Now()
++	var r reliableMedia
++	r.enable()
++	_, _, _, err := r.handle(wrappedMedia(mediaWindow, 5, 0, "too far"), now)
++	require.ErrorIs(t, err, errMediaGap)
++	require.Empty(t, r.pending)
++	_, _, _, err = r.handle(wrappedMedia(mediaWindow-1, 5, 0, "inside window"), now)
++	require.NoError(t, err)
++	ack, err := r.ack(now)
++	require.NoError(t, err)
++	require.LessOrEqual(t, len(ack), 1200)
++	_, err = r.ack(now.Add(mediaTimeout))
++	require.ErrorIs(t, err, errMediaGap)
++}
++
++func TestReliableMediaStatisticsAndCommands(t *testing.T) {
++	var r reliableMedia
++	r.enable()
++	now := time.Now()
++	p := wrappedMedia(0, 5, 8, "video")
++	p[8], p[9] = 0x34, 0x12
++	packets, stats, handled, err := r.handle(p, now)
++	require.NoError(t, err)
++	require.True(t, handled)
++	require.Len(t, packets, 1)
++	require.Equal(t, "video", string(packets[0][28:]))
++	require.Equal(t, byte(11), stats[0])
++	require.Equal(t, []byte{0x34, 0x12}, stats[8:10])
++	p = wrappedMedia(3, 0, 0, "command")
++	p[17] = 0x70
++	_, _, handled, err = r.handle(p, now)
++	require.NoError(t, err)
++	require.False(t, handled)
++	ack, err := r.ack(now)
++	require.NoError(t, err)
++	require.Equal(t, uint16(3), binary.LittleEndian.Uint16(ack[12:]))
++	_, _, handled, err = r.handle(wrappedMedia(0, 12, 0, "parity"), now)
++	require.NoError(t, err)
++	require.True(t, handled)
++}
++
++func TestReliableMediaConcurrentACK(t *testing.T) {
++	var r reliableMedia
++	r.enable()
++	var wg sync.WaitGroup
++	wg.Add(1)
++	go func() {
++		defer wg.Done()
++		for i := 0; i < 1000; i++ {
++			_, err := r.ack(time.Now())
++			require.NoError(t, err)
++		}
++	}()
++	for i := 0; i < 1000; i++ {
++		_, _, _, err := r.handle(wrappedMedia(uint16(i), 5, 0, "video"), time.Now())
++		require.NoError(t, err)
++	}
++	wg.Wait()
++}
++
++func TestResendLoginFlag(t *testing.T) {
++	c := DTLSConn{}
++	for _, resend := range []bool{false, true} {
++		b := c.msgAVLogin(magicAVLogin1, 570, 1, []byte{1, 2, 3, 4}, resend)
++		require.Equal(t, resend, b[538] == 1)
++		require.Equal(t, byte(0), b[536])
++	}
++}
++
++func TestReliableMediaRejectsTruncatedFragments(t *testing.T) {
++	var r reliableMedia
++	r.enable()
++	now := time.Now()
++	p := wrappedMedia(0, 5, 8, "complete payload")
++	for _, length := range []int{0, 1, 7, 15, 23, 43, len(p) - 1} {
++		packets, _, _, err := r.handle(p[:length], now)
++		require.NoError(t, err)
++		require.Empty(t, packets)
++	}
++	require.Zero(t, r.next)
++	packets, _, _, err := r.handle(p, now)
++	require.NoError(t, err)
++	require.Len(t, packets, 1)
++}
++
++func TestReliableMediaDisabled(t *testing.T) {
++	var r reliableMedia
++	packets, stats, handled, err := r.handle(wrappedMedia(0, 5, 8, "video"), time.Now())
++	require.NoError(t, err)
++	require.False(t, handled)
++	require.Empty(t, packets)
++	require.Nil(t, stats)
++	ack, err := r.ack(time.Now())
++	require.NoError(t, err)
++	require.Nil(t, ack)
++}
+diff --git a/pkg/wyze/client.go b/pkg/wyze/client.go
+index 27aad4a..ddba01e 100644
+--- a/pkg/wyze/client.go
++++ b/pkg/wyze/client.go
+@@ -322,7 +322,8 @@ func (c *Client) doAVLogin() error {
+ 		fmt.Printf("[Wyze] Sending AV Login\n")
+ 	}
+ 
+-	if err := c.conn.AVClientStart(5 * time.Second); err != nil {
++	// HL_BC keyframes span hundreds of fragments and need retransmission.
++	if err := c.conn.AVClientStart(5*time.Second, c.model == "HL_BC"); err != nil {
+ 		return fmt.Errorf("wyze: av login failed: %w", err)
+ 	}
+ 
