@@ -27,6 +27,9 @@ __version__ = "1.0.0"
 
 FRAME_RE = re.compile(r"\bn:\s*\d+\s+pts:\s*\S+\s+pts_time:(\S+).*?\bs:(\d+)x(\d+)")
 LEVEL_RE = re.compile(r"\[(warning|error|fatal)\]")
+# The null muxer that ends the measurement pipeline. Its complaints are about
+# repeated timestamps reaching the output, not about decoding.
+OUTPUT_MUXER_RE = re.compile(r"^\[null @ ")
 INPUT_RE = re.compile(r"\bInput #0\b")
 VIDEO_RE = re.compile(r"\bStream #0:\d+\S*: Video:")
 URL_RE = re.compile(r"\b[a-z][a-z0-9+.-]*://[^\s'\"]+", re.I)
@@ -83,7 +86,8 @@ def parse_line(line: str, t: float, cap: Capture) -> None:
         cap.has_video = True
     level = LEVEL_RE.search(line)
     if level:
-        target = cap.warnings if level.group(1) == "warning" else cap.errors
+        harness = OUTPUT_MUXER_RE.match(line)
+        target = cap.warnings if level.group(1) == "warning" or harness else cap.errors
         target.append((t, redact(line.strip())))
 
 
@@ -191,6 +195,7 @@ def summarize(cap: Capture, duration: float, warmup: float, expect: str | None =
         pts_gaps_over_150ms=sum(g > SMALL_GAP for g in pts_gaps),
         pts_gaps_over_500ms=sum(g > BIG_GAP for g in pts_gaps),
         pts_backwards=sum(g < 0 for g in pts_steps),
+        pts_repeats=sum(g == 0 for g in pts_steps),
         decode_errors=len(errors),
         decode_errors_warmup=sum(t < start for t, _ in cap.errors),
         decode_warnings=sum(start <= t <= end for t, _ in cap.warnings),
@@ -239,7 +244,8 @@ def render(r: dict) -> str:
         f"arrival gaps max {_seconds(r['arrival_gap_max_s'])}; >150 ms: {r['arrival_gaps_over_150ms']};"
         f" >500 ms: {r['arrival_gaps_over_500ms']}",
         f"pts gaps     max {_seconds(r['pts_gap_max_s'])}; >150 ms: {r['pts_gaps_over_150ms']};"
-        f" >500 ms: {r['pts_gaps_over_500ms']}; backwards: {r['pts_backwards']}",
+        f" >500 ms: {r['pts_gaps_over_500ms']}; backwards: {r['pts_backwards']};"
+        f" repeated: {r['pts_repeats']}",
         f"decoder      {r['decode_errors']} errors, {r['decode_warnings']} warnings"
         f" ({r['decode_errors_warmup']} errors during warmup, not counted)",
     ]

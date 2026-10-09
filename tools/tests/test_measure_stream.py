@@ -72,6 +72,15 @@ class ParseTests(unittest.TestCase):
         self.assertEqual([t for t, _ in cap.errors], [1.0])
         self.assertEqual([t for t, _ in cap.warnings], [2.0])
 
+    def test_output_muxer_messages_are_not_decoder_errors(self):
+        # The null muxer at the end of the measurement pipeline complains when
+        # two frames share a timestamp. The video itself decoded fine.
+        cap = ms.Capture()
+        ms.parse_line("[null @ 0x5754] [error] Application provided invalid, non monotonically "
+                      "increasing dts to muxer in stream 0: 469 >= 469", 5.0, cap)
+        self.assertEqual(cap.errors, [])
+        self.assertEqual(len(cap.warnings), 1)
+
     def test_redact(self):
         text = ("[error] rtsp://u:p@10.1.2.3:8554/x wyze://10.1.2.3?uid=ABC&enr=x%2Fy&mac=D03F27 "
                 "uid=ABC enr=x%2Fy mac=D03F27 at 10.9.8.7")
@@ -147,6 +156,14 @@ class SummaryTests(unittest.TestCase):
         self.assertEqual(r["verdict"], "FAIL")
         self.assertEqual(r["decode_errors"], 1)
         self.assertEqual(r["error_samples"], ["[h264] [error] error while decoding MB 30 0"])
+
+    def test_repeated_pts_counted_without_failing(self):
+        t = clean_times()
+        pts = list(t)
+        pts[150] = pts[149]
+        r = ms.summarize(cap_with(frames(t, pts), end=12.0), 10, 2)
+        self.assertEqual(r["pts_repeats"], 1)
+        self.assertEqual(r["verdict"], "PASS", r["reasons"])
 
     def test_backwards_pts_counted_not_gap(self):
         t = clean_times()
