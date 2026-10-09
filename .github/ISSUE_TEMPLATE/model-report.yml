@@ -1,0 +1,76 @@
+name: Model report
+description: Share a measure-stream result for a Wyze camera model.
+title: "Model report: "
+labels: ["model-report"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for measuring a camera. Run `tools/measure_stream.py` for 300 s
+        with Frigate attached, then paste its `--json` output below. That output
+        is already redacted. Please do not paste anything else from your system.
+  - type: input
+    id: model_code
+    attributes:
+      label: Model code
+      description: The `model` field from the bridge's /api/cameras, e.g. HL_CAM4.
+    validations:
+      required: true
+  - type: input
+    id: model_name
+    attributes:
+      label: Model name
+      placeholder: V4
+  - type: input
+    id: firmware
+    attributes:
+      label: Firmware version
+      description: The `fw_version` field from /api/cameras.
+    validations:
+      required: true
+  - type: dropdown
+    id: arch
+    attributes:
+      label: Bridge host architecture
+      options:
+        - amd64
+        - arm64
+    validations:
+      required: true
+  - type: dropdown
+    id: path
+    attributes:
+      label: Stream path
+      description: From go2rtc's /api/streams `protocol` field.
+      options:
+        - native (wyze/dtls)
+        - WebRTC, model is a WebRTC streamer
+        - WebRTC, forced with MODEL_OVERRIDES
+        - WebRTC, auto-promoted by the bridge
+        - unknown
+    validations:
+      required: true
+  - type: input
+    id: image
+    attributes:
+      label: Image tag and digest
+      placeholder: ghcr.io/seitzbg/wyze-bridge-patched:4.5.0-1@sha256:...
+  - type: textarea
+    id: measurement
+    attributes:
+      label: measure-stream --json output
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Overrides you set, patch gates you changed, Wi-Fi conditions.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy
+      options:
+        - label: I removed IP addresses, URLs, MAC addresses, uid/enr values and camera names.
+          required: true
