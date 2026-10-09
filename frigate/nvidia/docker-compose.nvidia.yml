@@ -1,0 +1,18 @@
+# NVIDIA GPU variant. Use it on top of the base file:
+#   docker compose -f docker-compose.yml -f nvidia/docker-compose.nvidia.yml up -d
+services:
+  frigate:
+    image: ghcr.io/blakeblackshear/frigate:0.18.0-tensorrt
+    # Six 2304x1296 cameras needed more than 654 MB here, so give it room.
+    shm_size: "1gb"
+    # NVIDIA Container Toolkit form from Frigate's docs. On hosts that expose
+    # the GPU through CDI instead, replace deploy: with
+    #   devices:
+    #     - nvidia.com/gpu=all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

@@ -1,0 +1,61 @@
+# Frigate config for Wyze cameras served by the patched wyze-bridge, NVIDIA
+# variant. Copy to frigate/config/config.yml, then replace the example camera with
+# yours. Stream names come from the bridge (see the README quickstart).
+mqtt:
+  enabled: false
+
+# ONNX detector on an NVIDIA GPU (the -tensorrt image) with YOLOv9-t at 320.
+# Generate the model first with nvidia/model-export.Dockerfile.
+detectors:
+  onnx:
+    type: onnx
+
+model:
+  model_type: yolo-generic
+  width: 320
+  height: 320
+  input_tensor: nchw
+  input_dtype: float
+  path: /config/model_cache/yolov9-t-320.onnx
+  labelmap_path: /labelmap/coco-80.txt
+
+# NVDEC hardware decode, one ffmpeg process per camera on the GPU.
+ffmpeg:
+  hwaccel_args: preset-nvidia
+
+objects:
+  track: [person, car, dog, cat]
+
+record:
+  enabled: true
+  continuous:
+    days: 7
+  motion:
+    days: 7
+  alerts:
+    retain:
+      days: 30
+  detections:
+    retain:
+      days: 30
+
+snapshots:
+  enabled: true
+  retain:
+    default: 30
+
+cameras:
+  front_door:                     # any name; the URL path is the bridge stream name
+    ffmpeg:
+      inputs:
+        # One input for detect and record keeps one connection to the
+        # bridge, which keeps the camera at full resolution.
+        - path: rtsp://{FRIGATE_BRIDGE_IP}:8554/front_door
+          roles: [detect, record]
+    detect:
+      fps: 5
+      # Set to the resolution measure-stream reports for this camera.
+      width: 2304
+      height: 1296
+
+version: 0.18-0
