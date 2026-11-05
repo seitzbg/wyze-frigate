@@ -69,7 +69,9 @@ does not change.
 These models report no LAN address, so bridge 4.5.0 skips them. They stream
 through Wyze's cloud gateway, which needs the second bridge described in
 [bulb-cam-pan.md](bulb-cam-pan.md). Video crosses the internet twice, so
-this path is not a LAN path.
+this path is not a LAN path. That recipe serves the Bulb Cam Pan only
+(`FILTER_MODELS=HL_BCP`); a Cam Pan v4 would need `HL_PAN4` added to that
+filter, which nobody here has run.
 
 | Model | Code | Quality label | Status | Notes |
 | ----- | ---- | ------------- | ------ | ----- |
@@ -88,12 +90,13 @@ bridge on an amd64 host at commit `3d62e4f`.
 | 1 | 2560x1440 | 5908 | 19.69 fps | 0.510 s | 1 | 0.152 s | 0 | FAIL on the gap |
 | 2 | 2560x1440 | 5932 | 19.77 fps | 0.764 s | 2 | 0.138 s | 0 | FAIL on the gaps |
 
-Every frame arrived at 2560x1440 and the timestamps never jumped by more
-than 0.152 s, so nothing was missing from the stream; delivery is just
-burstier than on the LAN cameras. Frames came in clumps: over 150 arrival
-gaps of more than 150 ms in each five-minute run, against a handful on the
-Bulb Cams, and a few of them crossed the tool's 500 ms limit. That is what
-a relay through the internet looks like, and it is why the tool says FAIL.
+Both runs held 2560x1440 for every decoded frame at 1.5% below the nominal
+rate, with timestamp holes of at most 0.152 s, which at 20 fps is two or
+three frames. The larger gaps were in delivery, not in the stream: frames
+came in clumps, over 150 arrival gaps of more than 150 ms in each
+five-minute run against a handful on the Bulb Cams, and a few of them
+crossed the tool's 500 ms limit. That is what a relay through the internet
+looks like, and it is why the tool says FAIL.
 Frigate recorded through both runs without complaint. The decoder warnings
 (140 and 174) were all the tool's own `non monotonically increasing dts`
 line from its null output (see [troubleshooting.md](troubleshooting.md)),

@@ -21,6 +21,10 @@ services:
       - "5081:5080"   # web UI and REST API (BRIDGE_AUTH)
     env_file: .env
     environment:
+      # Docker publishes 8556 on every interface and its rules bypass ufw, so
+      # RTSP must have a login. Compose refuses to start until STREAM_AUTH is
+      # set in .env (user:password; the same goes in Frigate's input URL).
+      STREAM_AUTH: ${STREAM_AUTH:?set STREAM_AUTH=user:password in bridge-lake/.env}
       # Serve only the Lake models. Every other camera stays on ../bridge.
       FILTER_MODELS: HL_BCP
       # The stock bridge already polls the account's event feed every

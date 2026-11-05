@@ -31,7 +31,7 @@ The account preparation is the same as the [README](../README.md) step 1.
 Both bridges log in to the same account.
 
 ```sh
-cp bridge-lake/.env.example bridge-lake/.env   # fill in the account, API key, BRIDGE_PASSWORD
+cp bridge-lake/.env.example bridge-lake/.env   # fill in the account, API key, BRIDGE_PASSWORD, STREAM_AUTH
 docker compose -f bridge-lake/docker-compose.yml up -d --build
 ```
 
@@ -39,6 +39,12 @@ The build compiles the bridge and go2rtc from source and takes a few
 minutes. The compose file pins a commit, so a rebuild gives the same result
 until you change the pin. The container uses ordinary Docker networking: the
 session is outbound only, and no camera needs to reach this host.
+
+`STREAM_AUTH` is required here, unlike on the first bridge. Docker publishes
+the RTSP port on every interface with its own firewall rules, so a host
+firewall does not cover it; the compose file refuses to start until
+`STREAM_AUTH` has a `user:password` value, and that login goes into
+Frigate's input URL below.
 
 `FILTER_MODELS=HL_BCP` keeps this bridge to the Bulb Cam Pan, and
 `ALERTS_INTERVAL=0` leaves the account's event polling to the first bridge.
@@ -60,17 +66,23 @@ A Lake camera gets three go2rtc streams. Frigate wants the second one:
 | `<name>_4k` | the camera's own HEVC stream, 2560x1440 |
 | `<name>_lake` | the raw transport, used internally |
 
-So the Frigate input is `rtsp://BRIDGE_HOST:8556/<name>_4k`. Port 8556 is
-the second bridge's RTSP port on the host; `bridge/` keeps 8554.
+So the Frigate input is `rtsp://user:password@BRIDGE_HOST:8556/<name>_4k`,
+with the `STREAM_AUTH` login. Port 8556 is the second bridge's RTSP port on
+the host; `bridge/` keeps 8554.
 
 ## Attach Frigate
+
+Put the `STREAM_AUTH` value in `frigate/.env` as `FRIGATE_LAKE_AUTH` (there
+is a commented line for it in `frigate/.env.example`); Frigate substitutes
+`{FRIGATE_...}` variables in its config, which keeps the password out of
+`config.yml`.
 
 ```yaml
 cameras:
   front_door:
     ffmpeg:
       inputs:
-        - path: rtsp://{FRIGATE_BRIDGE_IP}:8556/front_door_4k
+        - path: rtsp://{FRIGATE_LAKE_AUTH}@{FRIGATE_BRIDGE_IP}:8556/front_door_4k
           roles: [detect, record]
     detect:
       fps: 5
@@ -83,16 +95,18 @@ Frigate decodes HEVC on the CPU unless you give it a hardware decoder; one
 Frigate attached:
 
 ```sh
-python3 tools/measure_stream.py rtsp://BRIDGE_HOST:8556/front_door_4k --expect 2560x1440 --expect-fps 20
+python3 tools/measure_stream.py rtsp://user:password@BRIDGE_HOST:8556/front_door_4k --expect 2560x1440 --expect-fps 20
 ```
+
+The tool scrubs the credentials from what it reports.
 
 ## What to expect
 
 - Delivery is bursty. Frames arrive in clumps, and a few times in five
   minutes nothing arrives for more than half a second, so `measure-stream`
-  reports FAIL on that gap even though every frame is there and the
-  timestamps are continuous. Read its resolution, delivered rate and
-  timestamp lines; Frigate records through the clumps.
+  reports FAIL on that gap while the timestamps show holes of a few frames
+  at most. Read its resolution, delivered rate and timestamp lines; Frigate
+  records through the clumps.
 - A new session starts at 640x360 and switches to 2560x1440 within a few
   seconds. The bridge keeps watching the delivered resolution (every minute
   after a two-minute warmup) and asks the camera for `2.5k` again when it
@@ -137,12 +151,13 @@ Treat that output as secret, as with the first bridge.
 | Port | Service | Authentication |
 | ---- | ------- | -------------- |
 | 5081/tcp | Bridge web UI and REST API | `BRIDGE_AUTH` (HTTP basic auth) |
-| 8556/tcp | RTSP (what Frigate reads) | `STREAM_AUTH`, one user for all cameras |
+| 8556/tcp | RTSP (what Frigate reads) | `STREAM_AUTH`, required by the compose file |
 
 go2rtc's API (1984) and WebRTC ports are not published, so the web UI's own
 video player does not work for this bridge; use Frigate or an RTSP player.
 Docker publishes 5081 and 8556 with its own firewall rules, which `ufw`'s
-host rules do not cover; set `BRIDGE_PASSWORD` and consider `STREAM_AUTH`.
+host rules do not cover, which is why both carry a login: set
+`BRIDGE_PASSWORD`, and `STREAM_AUTH` is mandatory.
 `bridge-lake/config/` holds login tokens and camera details. Keep it out of
 shared backups and out of git (`.gitignore` excludes it).
 

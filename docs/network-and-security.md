@@ -75,7 +75,8 @@ nc -vz -w 3 BRIDGE_HOST 1984    # must time out or be refused
 5081 (web UI and REST API, `BRIDGE_AUTH`) and 8556 (RTSP, `STREAM_AUTH`).
 Its go2rtc API and WebRTC ports stay inside the container. Docker publishes
 ports through its own firewall chain, so the `ufw` rules above do not cover
-them. [bulb-cam-pan.md](bulb-cam-pan.md) has the details. Its
+them; that is why its compose file refuses to start without `STREAM_AUTH`.
+[bulb-cam-pan.md](bulb-cam-pan.md) has the details. Its
 `bridge-lake/config/` directory is a secret for the same reasons as
 `bridge/config/`.
 

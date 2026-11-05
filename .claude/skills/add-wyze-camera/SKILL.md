@@ -21,7 +21,11 @@ curl -s -u "$BRIDGE_USERNAME:$BRIDGE_PASSWORD" http://BRIDGE_HOST:5080/api/camer
   | jq '.[] | {name, model, model_name, fw_version, state}'
 ```
 
-`name` is the stream name. Done when you have the model code and firmware.
+`name` is the stream name. A camera that is in the Wyze app but not in this
+list was skipped by the bridge; `docker logs wyze-bridge 2>&1 | grep -i
+skipping` says why. `missing P2P params` means a Bulb Cam Pan or another
+model with no LAN path: continue with step 2 and the second bridge. Done when
+you have the model code and firmware.
 
 ## 2. Look up the model
 
@@ -32,9 +36,10 @@ resolution and status. If the row names an override (for example the V4's
 
 A Bulb Cam Pan (`HL_BCP`) is not served by `bridge/` at all. It needs the
 second bridge in `bridge-lake/` (`docs/bulb-cam-pan.md`): its stream is
-`<name>_4k` on port 8556, its API is on port 5081, and its go2rtc API is
-only reachable with `docker exec`. The steps below still apply, with those
-ports and `--expect 2560x1440 --expect-fps 20`.
+`<name>_4k` on port 8556 behind the `STREAM_AUTH` login from the user's
+`bridge-lake/.env`, its API is on port 5081, and its go2rtc API is only
+reachable with `docker exec`. The steps below still apply, with those ports,
+the login in the stream URL, and `--expect 2560x1440 --expect-fps 20`.
 
 Done when you know which path the camera should be on and whether anyone
 has verified the model.
