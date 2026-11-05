@@ -30,6 +30,12 @@ resolution and status. If the row names an override (for example the V4's
 `MODEL_OVERRIDES=HL_CAM4:is_webrtc=true`), tell the user and add it to
 `bridge/.env` only with their OK, then restart the bridge with their OK.
 
+A Bulb Cam Pan (`HL_BCP`) is not served by `bridge/` at all. It needs the
+second bridge in `bridge-lake/` (`docs/bulb-cam-pan.md`): its stream is
+`<name>_4k` on port 8556, its API is on port 5081, and its go2rtc API is
+only reachable with `docker exec`. The steps below still apply, with those
+ports and `--expect 2560x1440 --expect-fps 20`.
+
 Done when you know which path the camera should be on and whether anyone
 has verified the model.
 

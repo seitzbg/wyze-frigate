@@ -50,6 +50,10 @@ They are marked as such and may not hold for other models.
   connections failed behind Docker's bridge NAT in our setup.
 - **Port 1984 in use.** The bridge refuses to start when something already
   listens on 1984, for example a Frigate container that publishes it.
+- **`skipping device with missing P2P params` in the bridge log.** The Wyze
+  cloud reports no LAN address or P2P keys for the camera, so the bridge
+  registers no stream for it. The Bulb Cam Pan (`HL_BCP`) is like this; it
+  needs the second bridge in [bulb-cam-pan.md](bulb-cam-pan.md).
 
 ## Login fails
 

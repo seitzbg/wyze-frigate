@@ -1,7 +1,8 @@
 # Camera models
 
-Only the Bulb Cam has been tested with this image. Every other row comes
-from reading the code of the versions this image pins: bridge 4.5.0
+Only the Bulb Cam has been tested with this image, and only the Bulb Cam Pan
+with the second bridge in `bridge-lake/`. Every other row comes from reading
+the code of the versions this image pins: bridge 4.5.0
 (`internal/wyzeapi/models.go`, `internal/camera/manager.go`) and go2rtc
 `a7f9c64` (`pkg/wyze/client.go`). Those rows say what the software will try,
 not what the camera will do. If you run one of them, measure it and send a
@@ -62,6 +63,45 @@ it is untested.
 
 The Window Cam (`GW_WC`) uses the bridge's Gwell proxy, which this image
 does not change.
+
+## Lake path (Wyze cloud relay)
+
+These models report no LAN address, so bridge 4.5.0 skips them. They stream
+through Wyze's cloud gateway, which needs the second bridge described in
+[bulb-cam-pan.md](bulb-cam-pan.md). Video crosses the internet twice, so
+this path is not a LAN path.
+
+| Model | Code | Quality label | Status | Notes |
+| ----- | ---- | ------------- | ------ | ----- |
+| Bulb Cam Pan | `HL_BCP` | `2.5k` (2560x1440) | **Verified** | See measurements below: full resolution and frame rate, bursty delivery. Stream `<name>_4k`. |
+| Cam Pan v4 | `HL_PAN4` | `2k` (3840x2160) | Untested | The model the upstream pull request was written for. |
+
+### Bulb Cam Pan measurements
+
+One Bulb Cam Pan, firmware 21.2.2.1677 as reported by the Wyze API
+(21.2.4.1981 on the device), measured on 2026-11-04 with `measure-stream`
+from another host on the LAN, 300 s after a 10 s warmup, Frigate attached,
+bridge on an amd64 host at commit `3d62e4f`.
+
+| Run | Resolution | Frames | Delivered | Largest delivery gap | Gaps over 500 ms | Largest timestamp gap | Decoder errors | Verdict |
+| --- | ---------- | ------ | --------- | -------------------- | ---------------- | --------------------- | -------------- | ------- |
+| 1 | 2560x1440 | 5908 | 19.69 fps | 0.510 s | 1 | 0.152 s | 0 | FAIL on the gap |
+| 2 | 2560x1440 | 5932 | 19.77 fps | 0.764 s | 2 | 0.138 s | 0 | FAIL on the gaps |
+
+Every frame arrived at 2560x1440 and the timestamps never jumped by more
+than 0.152 s, so nothing was missing from the stream; delivery is just
+burstier than on the LAN cameras. Frames came in clumps: over 150 arrival
+gaps of more than 150 ms in each five-minute run, against a handful on the
+Bulb Cams, and a few of them crossed the tool's 500 ms limit. That is what
+a relay through the internet looks like, and it is why the tool says FAIL.
+Frigate recorded through both runs without complaint. The decoder warnings
+(140 and 174) were all the tool's own `non monotonically increasing dts`
+line from its null output (see [troubleshooting.md](troubleshooting.md)),
+with no timestamp repeats or reversals. During the first minute of run 2 a
+third RTSP client was attached to the same stream for a separate check.
+
+Earlier, on the same camera, the bridge held one session for 2 h 22 min at
+2560x1440 and 19.7 fps across three token renewals.
 
 ## Bulb Cam measurements
 

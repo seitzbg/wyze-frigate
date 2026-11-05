@@ -2,6 +2,8 @@
 .env
 bridge/config/
 bridge/media/
+bridge-lake/config/
+bridge-lake/media/
 frigate/config/
 frigate/storage/
 # Measurement artifacts can contain camera details.

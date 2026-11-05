@@ -1,0 +1,32 @@
+services:
+  wyze-bridge-lake:
+    # Second bridge, for the Bulb Cam Pan only. Built on this host from the
+    # upstream Lake pull request plus the Bulb Cam Pan commits, pinned by
+    # commit so a later push cannot change what you run. See
+    # ../docs/bulb-cam-pan.md. No prebuilt image is published for it.
+    build:
+      context: https://github.com/seitzbg/docker-wyze-bridge.git#3d62e4f8846e22dea43759cfd0912a6643fa0110
+      dockerfile: docker/Dockerfile
+      args:
+        VERSION: pan-v4-hlbcp-3d62e4f
+    image: wyze-bridge-lake:local
+    container_name: wyze-bridge-lake
+    restart: unless-stopped
+    # Ordinary Docker networking, unlike ../bridge. The Lake path is outbound
+    # only (signalling and media go to Wyze's gateway), so nothing needs the
+    # host's address. The ports are published beside the stock bridge's
+    # host-network listeners, which keep 5080 and 8554.
+    ports:
+      - "8556:8554"   # RTSP: rtsp://BRIDGE_HOST:8556/<name>_4k (STREAM_AUTH)
+      - "5081:5080"   # web UI and REST API (BRIDGE_AUTH)
+    env_file: .env
+    environment:
+      # Serve only the Lake models. Every other camera stays on ../bridge.
+      FILTER_MODELS: HL_BCP
+      # The stock bridge already polls the account's event feed every
+      # minute; a second poller gets rate limited.
+      ALERTS_INTERVAL: "0"
+    volumes:
+      # Login tokens and camera details. Keep it private.
+      - ./config:/config
+      - ./media:/media

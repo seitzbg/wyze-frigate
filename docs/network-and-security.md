@@ -69,6 +69,16 @@ Then prove it from a machine that is not allowed:
 nc -vz -w 3 BRIDGE_HOST 1984    # must time out or be refused
 ```
 
+## The Bulb Cam Pan bridge
+
+`bridge-lake/` runs with ordinary Docker networking and publishes two ports:
+5081 (web UI and REST API, `BRIDGE_AUTH`) and 8556 (RTSP, `STREAM_AUTH`).
+Its go2rtc API and WebRTC ports stay inside the container. Docker publishes
+ports through its own firewall chain, so the `ufw` rules above do not cover
+them. [bulb-cam-pan.md](bulb-cam-pan.md) has the details. Its
+`bridge-lake/config/` directory is a secret for the same reasons as
+`bridge/config/`.
+
 ## Frigate on the same host
 
 Frigate's own docs publish 8554, 8555 and 1984 for its built-in go2rtc. On
