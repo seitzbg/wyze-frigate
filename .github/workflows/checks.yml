@@ -40,4 +40,7 @@ jobs:
       - name: The Bulb Cam Pan compose file resolves with the env template
         run: |
           cp bridge-lake/.env.example bridge-lake/.env
+          # The template leaves STREAM_AUTH blank on purpose and the compose
+          # file refuses to resolve without it; CI supplies a dummy login.
+          printf 'STREAM_AUTH=ci:placeholder\n' >> bridge-lake/.env
           docker compose -f bridge-lake/docker-compose.yml config -q

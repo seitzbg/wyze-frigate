@@ -4,8 +4,9 @@
 # mode, so this also fails when the validation-errors banner appears.
 # Usage: tools/validate-frigate-config CONFIG [IMAGE]
 # Needs a local Docker daemon (the config is bind-mounted). FRIGATE_*
-# variables in your environment are passed through; FRIGATE_BRIDGE_IP gets
-# a placeholder when unset.
+# variables in your environment are passed through; FRIGATE_BRIDGE_IP and
+# FRIGATE_LAKE_AUTH (the Bulb Cam Pan bridge's RTSP login) get placeholders
+# when unset, so a config can be checked without the real values.
 set -eu
 config=${1:?usage: validate-frigate-config CONFIG [IMAGE]}
 image=${2:-ghcr.io/blakeblackshear/frigate:0.18.0}
@@ -13,7 +14,8 @@ dir=$(mktemp -d)
 trap 'rm -rf "$dir"' EXIT
 cp "$config" "$dir/config.yml"
 : "${FRIGATE_BRIDGE_IP:=192.0.2.10}"
-export FRIGATE_BRIDGE_IP
+: "${FRIGATE_LAKE_AUTH:=viewer:placeholder}"
+export FRIGATE_BRIDGE_IP FRIGATE_LAKE_AUTH
 envs=$(env | sed -n 's/^\(FRIGATE_[A-Z0-9_]*\)=.*/-e \1/p')
 # shellcheck disable=SC2086
 if ! out=$(docker run --rm -v "$dir:/config" $envs --entrypoint python3 "$image" -u -m frigate --validate-config 2>&1); then

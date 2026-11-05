@@ -75,7 +75,8 @@ the host; `bridge/` keeps 8554.
 Put the `STREAM_AUTH` value in `frigate/.env` as `FRIGATE_LAKE_AUTH` (there
 is a commented line for it in `frigate/.env.example`); Frigate substitutes
 `{FRIGATE_...}` variables in its config, which keeps the password out of
-`config.yml`.
+`config.yml`. `tools/validate-frigate-config` fills that variable with a
+placeholder when it is not in your shell, so validation works without it.
 
 ```yaml
 cameras:
