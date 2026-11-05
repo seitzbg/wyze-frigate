@@ -7,6 +7,7 @@ hardware, add a camera, or work out why a camera streams badly.
 ## Map
 
 - `bridge/`: the image (Dockerfile, go2rtc patches), compose file, `.env` template.
+- `bridge-lake/`: the second bridge for the Bulb Cam Pan, built from a pinned fork commit; `docs/bulb-cam-pan.md` explains it.
 - `frigate/`: baseline compose and config (OpenVINO on CPU); `nvidia/` holds the GPU variant.
 - `tools/measure_stream.py`: the instrument. `tools/validate-frigate-config`: strict config check.
 - `docs/`: how it works, models, patches, network and security, troubleshooting, tuning.

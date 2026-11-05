@@ -8,7 +8,12 @@ Wyze cloud ──(login, camera list)──> wyze-bridge
                                          v
 camera ──(native TUTK, LAN)──────────> go2rtc ──RTSP :8554──> Frigate
 camera ──(WebRTC via Wyze cloud)─────>   │
+camera ──> Wyze gateway ──(Lake)─────> second bridge ──RTSP :8556──> Frigate
 ```
+
+The third line is the Bulb Cam Pan's only path. It runs in a separate
+bridge built from a pending upstream change; see
+[bulb-cam-pan.md](bulb-cam-pan.md).
 
 ## The bridge
 
@@ -40,6 +45,11 @@ camera gets one of three sources:
    TUTK protocol directly over the LAN, using the camera IP the Wyze cloud
    reported. go2rtc's native client only supports cameras that report DTLS.
    It refuses a camera whose cloud record says `dtls=false`.
+
+A camera whose cloud record carries no P2P parameters at all gets none of
+these. Bridge 4.5.0 logs `skipping device with missing P2P params` and moves
+on. The Bulb Cam Pan is such a camera; the Lake path in
+[bulb-cam-pan.md](bulb-cam-pan.md) is the fourth source, in a newer bridge.
 
 **Automatic promotion.** When a native camera fails to connect
 `TUTK_FALLBACK_THRESHOLD` times in a row (default 5), the bridge switches it

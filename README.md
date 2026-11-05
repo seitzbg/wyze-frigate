@@ -8,9 +8,14 @@ CPU and NVIDIA hosts, a tool that measures what each camera actually
 delivers, and a guide for coding agents.
 
 It came out of running six Wyze Bulb Cams at 2304x1296 in Frigate. The
-Bulb Cam is the only model tested so far. [docs/models.md](docs/models.md)
-lists what the code does for every other model, and how to add your
-measurements.
+Bulb Cam and the Bulb Cam Pan are the models tested so far.
+[docs/models.md](docs/models.md) lists what the code does for every other
+model, and how to add your measurements.
+
+The Bulb Cam Pan has no LAN path: it streams only through Wyze's cloud
+gateway, which needs a second bridge built from a pending upstream change.
+[docs/bulb-cam-pan.md](docs/bulb-cam-pan.md) covers it; the quickstart below
+is for every other model.
 
 ## What you need
 
@@ -106,6 +111,8 @@ real stream path, measuring it, and diagnosing a failure.
   WebRTC paths, and why the patches exist.
 - [Camera models](docs/models.md): what is verified and what the code does
   for each model.
+- [Bulb Cam Pan](docs/bulb-cam-pan.md): the second bridge for the one model
+  that only streams through Wyze's cloud gateway.
 - [Patches](docs/patches.md): each go2rtc change, its upstream PR, and how
   to experiment with another model.
 - [Network and security](docs/network-and-security.md)
@@ -135,7 +142,11 @@ picks them up, the stock image will do the same job.
   (retransmission)
 - docker-wyze-bridge
   [#148](https://github.com/IDisposable/docker-wyze-bridge/issues/148)
-  (Bulb Cam support)
+  (Bulb Cam support),
+  [#161](https://github.com/IDisposable/docker-wyze-bridge/pull/161) (the
+  cloud gateway path, for the Cam Pan v4) and
+  [t0nyz0#2](https://github.com/t0nyz0/docker-wyze-bridge/pull/2) (the Bulb
+  Cam Pan on that path)
 
 ## License
 
@@ -148,5 +159,9 @@ notices and a description of the sources are in
 `/usr/share/doc/wyze-bridge-patched/` inside the image. The complete source
 for both is attached to every
 [release](https://github.com/seitzbg/wyze-frigate/releases).
+
+The Bulb Cam Pan bridge (`bridge-lake/`) is not published as an image. Its
+compose file builds docker-wyze-bridge (AGPL-3.0) and go2rtc (MIT) from
+source on your host, from a pinned commit of a public fork.
 
 Built on docker-wyze-bridge, go2rtc and Frigate.
